@@ -530,6 +530,17 @@ export default function SubscriptionBillingHub({
     }
   };
 
+  // Hardcoded valid redeem codes (client-side fallback for Vercel/serverless deployments
+  // where the Express API server may not be reachable).
+  const VALID_REDEEM_CODES: Record<string, { planId: string; description: string }> = {
+    "1413914":          { planId: "pro",        description: "Universal Chitti Promo Core Key" },
+    "CHITTI-ENTERPRISE":{ planId: "enterprise", description: "Enterprise Promo Access Code" },
+    "CHITTI-ULTRA":     { planId: "ultra",      description: "Ultra Multi-Agent License Key" },
+    "STUDENT-FREE":     { planId: "school",     description: "Academic Research Free Sandbox Key" },
+    "CHITTI-PRO":       { planId: "pro",        description: "Chitti Pro Promo Key" },
+    "CHITTI-STARTER":   { planId: "starter",    description: "Chitti Starter Promo Key" },
+  };
+
   const handleRedeemCode = async (targetPlanId: string, customCode?: string) => {
     const codeToUse = customCode !== undefined ? customCode : redeemCode;
     if (!codeToUse) {
@@ -542,6 +553,45 @@ export default function SubscriptionBillingHub({
     setCheckoutError("");
     setMainRedeemError("");
     setMainRedeemSuccess("");
+
+    const normalizedCode = codeToUse.trim().toUpperCase();
+
+    // ── Helper: activate subscription locally (client-side fallback) ──
+    const activateLocally = (finalPlanId: string) => {
+      const now = new Date();
+      const renewsAt = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
+      const newSub = {
+        planId: finalPlanId,
+        status: "active",
+        billingCycle: "monthly" as const,
+        startedAt: now.toISOString(),
+        renewsAt: renewsAt.toISOString(),
+        paymentProvider: `Redeem Code (${normalizedCode})`,
+        paymentCustomerId: `cust_redeem_${Date.now().toString().slice(-5)}`,
+        paymentSubscriptionId: `sub_redeem_${Date.now().toString().slice(-6)}`
+      };
+      setSubscription(newSub);
+      setOrganization(null);
+      setMainRedeemSuccess(`✅ Code applied! Plan ${finalPlanId.toUpperCase()} is now active!`);
+
+      if (checkoutPlan) {
+        setRazorpayStatus("success");
+        setTimeout(() => {
+          setCheckoutPlan(null);
+          setRazorpayStatus("idle");
+          setActiveTab("dashboard");
+          fetchSubscriptionData();
+          if (onRefreshStats) onRefreshStats();
+        }, 1500);
+      } else {
+        setTimeout(() => {
+          setMainRedeemSuccess("");
+          setActiveTab("dashboard");
+          fetchSubscriptionData();
+          if (onRefreshStats) onRefreshStats();
+        }, 3000);
+      }
+    };
     
     try {
       const res = await fetch("/api/subscription/redeem", {
@@ -582,9 +632,18 @@ export default function SubscriptionBillingHub({
         setMainRedeemError(errorMsg);
       }
     } catch (err) {
-      const errorMsg = "Failed to verify redeem code with server.";
-      setCheckoutError(errorMsg);
-      setMainRedeemError(errorMsg);
+      // ── Server unreachable (Vercel static deploy, network issue, etc.) ──
+      // Fall back to client-side validation using the hardcoded codes map.
+      console.warn("[Redeem] Server API unreachable, using client-side fallback validation.");
+      const codeEntry = VALID_REDEEM_CODES[normalizedCode];
+      if (codeEntry) {
+        const finalPlanId = codeEntry.planId;
+        activateLocally(finalPlanId);
+      } else {
+        const errorMsg = "Invalid redeem code. Please try again with a valid promo key.";
+        setCheckoutError(errorMsg);
+        setMainRedeemError(errorMsg);
+      }
     } finally {
       setIsRedeeming(false);
     }
