@@ -1,0 +1,394 @@
+{
+  "profile": {
+    "id": "user-1",
+    "name": "Master Commander",
+    "email": "commander@chitti-robo.ai",
+    "avatar_url": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+    "created_at": "2026-06-24T10:13:51.163Z",
+    "role": "owner_admin"
+  },
+  "chats": [
+    {
+      "id": "chat-default",
+      "title": "Chitti-Robo Operational Command",
+      "created_at": "2026-06-24T10:13:51.163Z"
+    }
+  ],
+  "messages": [
+    {
+      "id": "msg-welcome",
+      "chatId": "chat-default",
+      "role": "assistant",
+      "content": "Welcome to Chitti-Robo Mega AI Central Core. All agents are synced and operational. Submit a prompt or use voice control, and our auto-router will deploy the optimal specialized model cluster.",
+      "agentUsed": "Chitti-Robo Central Router",
+      "createdAt": "2026-06-24T10:13:51.163Z"
+    },
+    {
+      "id": "msg-user-1782296834371",
+      "chatId": "chat-default",
+      "role": "user",
+      "content": "hi",
+      "createdAt": "2026-06-24T10:27:14.371Z"
+    },
+    {
+      "id": "msg-assistant-1782296872187",
+      "chatId": "chat-default",
+      "role": "assistant",
+      "content": "Hello! Main OmniGen Central Router hoon. Aaj main aapki kaise help kar sakta hoon? Bataiye, kya query ya task hai aapka?",
+      "agentUsed": "GPT / Smart Chat (Gemini Core)",
+      "createdAt": "2026-06-24T10:27:52.187Z"
+    },
+    {
+      "id": "msg-user-1782297175858",
+      "chatId": "chat-default",
+      "role": "user",
+      "content": "hi",
+      "createdAt": "2026-06-24T10:32:55.858Z"
+    },
+    {
+      "id": "msg-assistant-1782297193856",
+      "chatId": "chat-default",
+      "role": "assistant",
+      "content": "Hi! Kaise hain aap? Aaj main aapki kya help kar sakta hoon? Bataiye!",
+      "agentUsed": "Gemini API (Direct Chat)",
+      "createdAt": "2026-06-24T10:33:13.856Z"
+    },
+    {
+      "id": "msg-user-1782297413296",
+      "chatId": "chat-default",
+      "role": "user",
+      "content": "hi",
+      "createdAt": "2026-06-24T10:36:53.296Z"
+    },
+    {
+      "id": "msg-assistant-1782297435579",
+      "chatId": "chat-default",
+      "role": "assistant",
+      "content": "Hi! Kaise ho aap? Main aapki kya help kar sakta hoon?",
+      "agentUsed": "Gemini API (Direct Chat)",
+      "createdAt": "2026-06-24T10:37:15.579Z"
+    },
+    {
+      "id": "msg-user-1782297649959",
+      "chatId": "chat-default",
+      "role": "user",
+      "content": "ਸੀ ਕੈਸੇ ਹੋ",
+      "createdAt": "2026-06-24T10:40:49.959Z"
+    },
+    {
+      "id": "msg-assistant-1782297665178",
+      "chatId": "chat-default",
+      "role": "assistant",
+      "content": "Main bilkul badhiya hoon, shukriya! Aap kaise hain? Sab kaisa chal raha hai?",
+      "agentUsed": "Gemini API (Direct Chat)",
+      "createdAt": "2026-06-24T10:41:05.178Z"
+    },
+    {
+      "id": "wacrm-sys-alert-1782297934111",
+      "chatId": "chat-default",
+      "role": "system",
+      "content": "🚨 **WACRM Webhook Rule Triggered!**\n\n**Rule:** \"tag_added\" matches value `urgent` for **Lead:** Bruce Wayne (15553960763)\n**AI Automation Action:** *Draft an urgent priority follow up welcoming them and confirming receipt of their inquiry.*\n\nDraft generated successfully in memory. Check WACRM Automation Hub to view the lead card.",
+      "agentUsed": "WACRM Webhook Router",
+      "createdAt": "2026-06-24T10:45:34.111Z"
+    }
+  ],
+  "memories": [
+    {
+      "id": "mem-init-1",
+      "content": "User prefers clean futuristic interfaces with glassmorphic cards and purple accents.",
+      "type": "user_preference",
+      "createdAt": "2026-06-24T10:13:51.163Z"
+    }
+  ],
+  "usageLogs": [
+    {
+      "id": "usage-1782296872187",
+      "agentName": "GPT / Smart Chat (Gemini Core)",
+      "taskType": "general_chat",
+      "tokensUsed": 150,
+      "description": "Routing intent classified as \"general_chat\"",
+      "createdAt": "2026-06-24T10:27:52.187Z"
+    },
+    {
+      "id": "usage-1782297193856",
+      "agentName": "Gemini API (Direct Chat)",
+      "taskType": "general_chat",
+      "tokensUsed": 150,
+      "description": "Routing intent classified as \"general_chat\"",
+      "createdAt": "2026-06-24T10:33:13.856Z"
+    },
+    {
+      "id": "usage-1782297435579",
+      "agentName": "Gemini API (Direct Chat)",
+      "taskType": "general_chat",
+      "tokensUsed": 150,
+      "description": "Routing intent classified as \"general_chat\"",
+      "createdAt": "2026-06-24T10:37:15.579Z"
+    },
+    {
+      "id": "usage-1782297665178",
+      "agentName": "Gemini API (Direct Chat)",
+      "taskType": "general_chat",
+      "tokensUsed": 150,
+      "description": "Routing intent classified as \"general_chat\"",
+      "createdAt": "2026-06-24T10:41:05.178Z"
+    }
+  ],
+  "wacrmLeads": [
+    {
+      "id": "wacrm-lead-1782297483316",
+      "name": "Aarav Sharma",
+      "phone": "919876543210",
+      "stage": "Proposal",
+      "tags": [
+        "urgent",
+        "SaaS Enterprise"
+      ],
+      "notes": [
+        "Offered custom bundle pack with 10 API credentials"
+      ],
+      "lastInteraction": "2026-06-24T10:45:34.111Z",
+      "createdAt": "2026-06-24T10:38:03.316Z"
+    },
+    {
+      "id": "wacrm-lead-1",
+      "name": "Diya Patel",
+      "phone": "919812345678",
+      "stage": "Won",
+      "tags": [
+        "Paid Tier",
+        "Converted"
+      ],
+      "notes": [
+        "Payment received. Fully activated integration node."
+      ],
+      "lastInteraction": "2026-06-24T10:45:47.918Z",
+      "createdAt": "2026-06-23T14:15:00.000Z"
+    },
+    {
+      "id": "wacrm-lead-2",
+      "name": "Kabir Singh",
+      "phone": "919823456789",
+      "stage": "Proposal",
+      "tags": [
+        "Developer",
+        "API Access"
+      ],
+      "notes": [
+        "Needs automated speech-to-text WhatsApp pipeline demo."
+      ],
+      "lastInteraction": "2026-06-23T18:30:00.000Z",
+      "createdAt": "2026-06-23T18:30:00.000Z"
+    }
+  ],
+  "wacrmEvents": [
+    {
+      "id": "evt-1782297947918",
+      "eventType": "stage_changed",
+      "leadPhone": "919812345678",
+      "leadName": "Diya Patel",
+      "details": "Webhook event \"stage_changed\" processed. CRM data synchronized successfully. Stage set to: Won",
+      "timestamp": "10:45:47 AM"
+    },
+    {
+      "id": "evt-1782297934111",
+      "eventType": "stage_changed",
+      "leadPhone": "919876543210",
+      "leadName": "Aarav Sharma",
+      "details": "Webhook event \"stage_changed\" processed. CRM data synchronized successfully. Stage set to: Proposal",
+      "timestamp": "10:45:34 AM"
+    },
+    {
+      "id": "evt-1782297483316",
+      "eventType": "lead_added",
+      "leadPhone": "919876543210",
+      "leadName": "Aarav Sharma",
+      "details": "Webhook event \"lead_added\" processed. CRM data synchronized successfully. Stage set to: New",
+      "timestamp": "10:38:03 AM"
+    },
+    {
+      "id": "evt-init-1",
+      "eventType": "system_link",
+      "leadPhone": "System",
+      "leadName": "Core Agent",
+      "details": "WACRM Webhook endpoint initialized and online.",
+      "timestamp": "10:13:51 AM"
+    }
+  ],
+  "wacrmRules": [
+    {
+      "id": "rule-1",
+      "trigger": "tag_added",
+      "triggerValue": "urgent",
+      "action": "ai_draft",
+      "actionValue": "Draft an urgent priority follow up welcoming them and confirming receipt of their inquiry."
+    },
+    {
+      "id": "rule-1782297500798",
+      "trigger": "stage_changed",
+      "triggerValue": "Proposal",
+      "action": "ai_draft",
+      "actionValue": "Draft an elite pricing proposal for enterprise level features"
+    }
+  ],
+  "promptTemplates": [
+    {
+      "id": "tpl-1",
+      "title": "3D Portfolio Builder",
+      "prompt": "Create a fully functional 3D animated personal portfolio website with interactive projects, responsive navigation, and smooth particle background transitions using React and Three.js.",
+      "category": "Website Builder",
+      "description": "Generates high-performance visual coding frameworks."
+    },
+    {
+      "id": "tpl-2",
+      "title": "Cinematic Neo-Noir",
+      "prompt": "Generate an image prompt: A cyberpunk programmer staring at a glowing holographic tree of life in a rainy alley, high contrast, cinematic soft volumetric lighting, shot on 35mm anamorphic lens.",
+      "category": "Image Prompt",
+      "description": "Creates intricate artistic synthesis outlines."
+    },
+    {
+      "id": "tpl-3",
+      "title": "SaaS Product Reel Script",
+      "prompt": "Write a 30-second advertising script for our new multi-agent orchestrator app, highlighting AI auto-routing, supercharged widgets, and a voice command panel. Include visual directions and scene transitions.",
+      "category": "Video Prompt",
+      "description": "Creates video timelines and script layers."
+    },
+    {
+      "id": "tpl-4",
+      "title": "Rust Core Debugger",
+      "prompt": "Analyze this Rust source file for thread-safety issues, suggest robust lock-free concurrency alternatives, and optimize the memory footprint.",
+      "category": "Coding Debugger",
+      "description": "For deep algorithmic analysis and memory tuning."
+    }
+  ],
+  "conversionHistory": [],
+  "savedFiles": [],
+  "investmentReports": [],
+  "subscription": {
+    "planId": "pro",
+    "status": "active",
+    "billingCycle": "monthly",
+    "startedAt": "2026-07-05T04:27:32.598Z",
+    "renewsAt": "2026-08-04T04:27:32.598Z",
+    "paymentProvider": "Redeem Code (1413914)",
+    "paymentCustomerId": "cust_redeem_52598",
+    "paymentSubscriptionId": "sub_redeem_652598"
+  },
+  "usageTracking": {
+    "aiMessages": 0,
+    "creativeUnits": 0,
+    "fileConversions": 0,
+    "urlAnalyses": 0,
+    "trendReports": 0,
+    "assetReports": 0,
+    "voiceCommands": 0,
+    "whatsappMessages": 0,
+    "memoryItems": 0,
+    "embedUsage": 0,
+    "estimatedApiCost": 0
+  },
+  "billingEvents": [
+    {
+      "id": "evt-redeem-1783225652598",
+      "user_id": "user-1",
+      "event_type": "subscription_upgraded",
+      "amount": 0,
+      "currency": "INR",
+      "plan_id": "pro",
+      "payment_status": "success",
+      "metadata": "Redeemed with code: 1413914",
+      "created_at": "2026-07-05T04:27:32.599Z"
+    },
+    {
+      "id": "evt-init",
+      "user_id": "user-1",
+      "event_type": "trial_started",
+      "amount": 0,
+      "currency": "INR",
+      "plan_id": "free_trial",
+      "payment_status": "success",
+      "metadata": "Initial sandbox registration",
+      "created_at": "2026-07-05T04:19:15.328Z"
+    }
+  ],
+  "organizationAccount": null,
+  "teamMembers": [],
+  "apiCostLogs": [
+    {
+      "id": "log-1",
+      "user_id": "user-1",
+      "agent_key": "agent-gpt-gemini",
+      "section_key": "intelligence_core",
+      "feature_key": "general_chat",
+      "provider": "Google Gemini 3.5 Flash",
+      "estimated_cost": 0.04,
+      "request_metadata": "Greeting",
+      "created_at": "2026-07-05T04:19:15.328Z"
+    }
+  ],
+  "redeemCodes": [
+    {
+      "code": "1413914",
+      "planId": "pro",
+      "maxUses": 999999,
+      "usesCount": 1,
+      "description": "Universal Chitti Promo Core Key",
+      "createdAt": "2026-07-05T04:19:15.292Z",
+      "usedBy": [
+        {
+          "userId": "user-1",
+          "email": "commander@chitti-robo.ai",
+          "redeemedAt": "2026-07-05T04:27:32.599Z"
+        }
+      ]
+    },
+    {
+      "code": "CHITTI-ENTERPRISE",
+      "planId": "enterprise",
+      "maxUses": 100,
+      "usesCount": 0,
+      "description": "Enterprise Promo Access Code",
+      "createdAt": "2026-07-05T04:19:15.292Z",
+      "usedBy": []
+    },
+    {
+      "code": "CHITTI-ULTRA",
+      "planId": "ultra",
+      "maxUses": 200,
+      "usesCount": 0,
+      "description": "Ultra Multi-Agent License Key",
+      "createdAt": "2026-07-05T04:19:15.292Z",
+      "usedBy": []
+    },
+    {
+      "code": "STUDENT-FREE",
+      "planId": "school",
+      "maxUses": 500,
+      "usesCount": 0,
+      "description": "Academic Research Free Sandbox Key",
+      "createdAt": "2026-07-05T04:19:15.292Z",
+      "usedBy": []
+    }
+  ],
+  "token_wallets": [
+    {
+      "id": "wallet-1783225652598",
+      "user_id": "user-1",
+      "organization_id": null,
+      "monthly_tokens_total": 150,
+      "monthly_tokens_used": 0,
+      "topup_tokens_total": 0,
+      "topup_tokens_used": 0,
+      "reserved_tokens": 0,
+      "available_tokens": 150,
+      "billing_cycle_start": "2026-07-05T04:27:32.598Z",
+      "billing_cycle_end": "2026-08-04T04:27:32.598Z",
+      "updated_at": "2026-07-05T04:27:32.598Z"
+    }
+  ],
+  "token_ledger": [],
+  "usage_events": [],
+  "razorpay_orders": [],
+  "webhook_events": [],
+  "jobs": []
+}

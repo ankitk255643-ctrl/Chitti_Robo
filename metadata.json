@@ -1,0 +1,6 @@
+{
+  "name": "OmniGen Mega AI",
+  "description": "A futuristic multi-agent AI assistant command center with automatic intent routing, voice controls, web research, file conversions, and vector memory.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

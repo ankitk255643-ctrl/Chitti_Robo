@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Custom neon glow modifiers and scrollbars */
+@layer utilities {
+  .glow-cyan {
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
+  }
+  .glow-purple {
+    box-shadow: 0 0 15px rgba(168, 85, 247, 0.3);
+  }
+  .glow-green {
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.3);
+  }
+  .glassmorphism {
+    background: rgba(4, 7, 18, 0.12);
+    backdrop-filter: blur(3px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .glassmorphism-light {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+  }
+}
+
+body {
+  background-color: #030712;
+  color: #f3f4f6;
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+*, ::before, ::after {
+  box-sizing: border-box;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(3, 7, 18, 0.4);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(6, 182, 212, 0.25);
+  border-radius: 4px;
+  border: 1px solid rgba(6, 182, 212, 0.1);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.45);
+}
+
+/* Glowing breathing orb animation - optimized for hardware acceleration */
+@keyframes orb-pulse {
+  0% {
+    transform: scale(1) translate(0px, 0px);
+    opacity: 0.85;
+  }
+  33% {
+    transform: scale(1.08) translate(8px, -8px);
+    opacity: 0.95;
+  }
+  66% {
+    transform: scale(0.92) translate(-6px, 6px);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1) translate(0px, 0px);
+    opacity: 0.85;
+  }
+}
+
+.animate-orb-slow-1 {
+  animation: orb-pulse 8s infinite alternate ease-in-out;
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
+}
+
+.animate-orb-slow-2 {
+  animation: orb-pulse 12s infinite alternate-reverse ease-in-out;
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0);
+}
+
+/* Sine wave animation for audio mic */
+@keyframes wave-bounce {
+  0%, 100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.wave-bar {
+  animation: wave-bounce 1s infinite ease-in-out;
+}
