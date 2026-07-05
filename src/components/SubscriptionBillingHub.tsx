@@ -1,31 +1,31 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  Check, 
-  X, 
-  TrendingUp, 
-  Users, 
-  Layers, 
-  DollarSign, 
-  CreditCard, 
-  ShieldAlert, 
-  Sliders, 
-  HelpCircle, 
-  RefreshCw, 
-  UserCheck, 
-  Coins, 
-  AlertTriangle, 
-  Sparkles, 
-  BookOpen, 
-  Building, 
-  Briefcase, 
-  Plus, 
-  Trash2, 
-  FileText, 
-  Download, 
-  Database, 
-  Cpu, 
-  Zap, 
+import {
+  Check,
+  X,
+  TrendingUp,
+  Users,
+  Layers,
+  DollarSign,
+  CreditCard,
+  ShieldAlert,
+  Sliders,
+  HelpCircle,
+  RefreshCw,
+  UserCheck,
+  Coins,
+  AlertTriangle,
+  Sparkles,
+  BookOpen,
+  Building,
+  Briefcase,
+  Plus,
+  Trash2,
+  FileText,
+  Download,
+  Database,
+  Cpu,
+  Zap,
   Lock,
   ArrowRight,
   Gift
@@ -39,9 +39,9 @@ interface SubscriptionBillingHubProps {
   onProfileUpdate?: (profile: any) => void;
 }
 
-export default function SubscriptionBillingHub({ 
-  currentTab, 
-  onNavigate, 
+export default function SubscriptionBillingHub({
+  currentTab,
+  onNavigate,
   onRefreshStats,
   globalProfile,
   onProfileUpdate
@@ -49,7 +49,7 @@ export default function SubscriptionBillingHub({
   // Global states
   const [loading, setLoading] = useState(true);
   const [localProfile, setLocalProfile] = useState<any>(null);
-  
+
   const profile = globalProfile || localProfile;
   const setProfile = (newProfile: any) => {
     setLocalProfile(newProfile);
@@ -63,13 +63,13 @@ export default function SubscriptionBillingHub({
   const [organization, setOrganization] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [apiCostLogs, setApiCostLogs] = useState<any[]>([]);
-  
+
   // UI preferences
   const [isYearly, setIsYearly] = useState(false);
   const [currency, setCurrency] = useState<"INR" | "USD">("INR");
   const [activeTab, setActiveTab] = useState<"pricing" | "dashboard" | "admin">("pricing");
   const [checkoutPlan, setCheckoutPlan] = useState<any>(null);
-  
+
   // Organization form state
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberEmail, setNewMemberEmail] = useState("");
@@ -273,11 +273,11 @@ export default function SubscriptionBillingHub({
 
   const activateUserSubscription = async (userId: string, planId: string, paymentData: any) => {
     setRazorpayStatus("success");
-    
+
     // Update user subscription state locally
     setSubscription(paymentData.subscription);
     setOrganization(paymentData.organizationAccount);
-    
+
     // Refresh components and dashboard
     setTimeout(() => {
       setCheckoutPlan(null);
@@ -302,7 +302,7 @@ export default function SubscriptionBillingHub({
         setTeamMembers(data.teamMembers);
         setTokenWallet(data.tokenWallet);
       }
-      
+
       // If admin, load extra diagnostics
       if (data.profile?.role === "owner_admin") {
         const costRes = await fetch("/api/admin/api-cost-logs");
@@ -446,7 +446,7 @@ export default function SubscriptionBillingHub({
 
   const initiateCheckout = (plan: any) => {
     let finalPrice = plan.basePrice;
-    
+
     // Compute dynamic interactive pricing
     if (plan.id === "custom_individual") {
       // 3x API cost + margins
@@ -530,17 +530,6 @@ export default function SubscriptionBillingHub({
     }
   };
 
-  // Hardcoded valid redeem codes (client-side fallback for Vercel/serverless deployments
-  // where the Express API server may not be reachable).
-  const VALID_REDEEM_CODES: Record<string, { planId: string; description: string }> = {
-    "1413914":          { planId: "pro",        description: "Universal Chitti Promo Core Key" },
-    "CHITTI-ENTERPRISE":{ planId: "enterprise", description: "Enterprise Promo Access Code" },
-    "CHITTI-ULTRA":     { planId: "ultra",      description: "Ultra Multi-Agent License Key" },
-    "STUDENT-FREE":     { planId: "school",     description: "Academic Research Free Sandbox Key" },
-    "CHITTI-PRO":       { planId: "pro",        description: "Chitti Pro Promo Key" },
-    "CHITTI-STARTER":   { planId: "starter",    description: "Chitti Starter Promo Key" },
-  };
-
   const handleRedeemCode = async (targetPlanId: string, customCode?: string) => {
     const codeToUse = customCode !== undefined ? customCode : redeemCode;
     if (!codeToUse) {
@@ -548,51 +537,12 @@ export default function SubscriptionBillingHub({
       setMainRedeemError("Please enter a redeem code.");
       return;
     }
-    
+
     setIsRedeeming(true);
     setCheckoutError("");
     setMainRedeemError("");
     setMainRedeemSuccess("");
 
-    const normalizedCode = codeToUse.trim().toUpperCase();
-
-    // ── Helper: activate subscription locally (client-side fallback) ──
-    const activateLocally = (finalPlanId: string) => {
-      const now = new Date();
-      const renewsAt = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
-      const newSub = {
-        planId: finalPlanId,
-        status: "active",
-        billingCycle: "monthly" as const,
-        startedAt: now.toISOString(),
-        renewsAt: renewsAt.toISOString(),
-        paymentProvider: `Redeem Code (${normalizedCode})`,
-        paymentCustomerId: `cust_redeem_${Date.now().toString().slice(-5)}`,
-        paymentSubscriptionId: `sub_redeem_${Date.now().toString().slice(-6)}`
-      };
-      setSubscription(newSub);
-      setOrganization(null);
-      setMainRedeemSuccess(`✅ Code applied! Plan ${finalPlanId.toUpperCase()} is now active!`);
-
-      if (checkoutPlan) {
-        setRazorpayStatus("success");
-        setTimeout(() => {
-          setCheckoutPlan(null);
-          setRazorpayStatus("idle");
-          setActiveTab("dashboard");
-          fetchSubscriptionData();
-          if (onRefreshStats) onRefreshStats();
-        }, 1500);
-      } else {
-        setTimeout(() => {
-          setMainRedeemSuccess("");
-          setActiveTab("dashboard");
-          fetchSubscriptionData();
-          if (onRefreshStats) onRefreshStats();
-        }, 3000);
-      }
-    };
-    
     try {
       const res = await fetch("/api/subscription/redeem", {
         method: "POST",
@@ -602,13 +552,13 @@ export default function SubscriptionBillingHub({
           code: codeToUse
         })
       });
-      
+
       const data = await res.json();
       if (res.ok && data.success) {
         setSubscription(data.subscription);
         setOrganization(data.organizationAccount);
         setMainRedeemSuccess(`Success! Code applied. Plan ${targetPlanId.toUpperCase()} has been activated!`);
-        
+
         if (checkoutPlan) {
           setRazorpayStatus("success");
           setTimeout(() => {
@@ -632,15 +582,39 @@ export default function SubscriptionBillingHub({
         setMainRedeemError(errorMsg);
       }
     } catch (err) {
-      // ── Server unreachable (Vercel static deploy, network issue, etc.) ──
-      // Fall back to client-side validation using the hardcoded codes map.
-      console.warn("[Redeem] Server API unreachable, using client-side fallback validation.");
-      const codeEntry = VALID_REDEEM_CODES[normalizedCode];
-      if (codeEntry) {
-        const finalPlanId = codeEntry.planId;
-        activateLocally(finalPlanId);
+      console.error("Redeem server failed. Using offline fallback...", err);
+
+      // OFFLINE FALLBACK CODE
+      if (codeToUse.trim() === "1413914") {
+        const offlineSubscription = {
+          planId: targetPlanId,
+          status: "active",
+          billingCycle: "lifetime",
+          paymentProvider: "Offline Redeem Code",
+          activatedAt: new Date().toISOString(),
+          renewsAt: null,
+          isFree: true
+        };
+
+        setSubscription(offlineSubscription);
+
+        // Save locally
+        localStorage.setItem("premium", "true");
+        localStorage.setItem("subscription", JSON.stringify(offlineSubscription));
+        localStorage.setItem("redeemActivated", "true");
+
+        setMainRedeemSuccess(
+          `${targetPlanId.toUpperCase()} subscription activated successfully.`
+        );
+
+        setTimeout(() => {
+          setMainRedeemSuccess("");
+          setActiveTab("dashboard");
+          if (onRefreshStats) onRefreshStats();
+        }, 1500);
       } else {
-        const errorMsg = "Invalid redeem code. Please try again with a valid promo key.";
+        const errorMsg =
+          "Server unavailable and redeem code is invalid.";
         setCheckoutError(errorMsg);
         setMainRedeemError(errorMsg);
       }
@@ -843,7 +817,7 @@ export default function SubscriptionBillingHub({
         </div>
 
         <div className="flex items-center gap-3 self-end md:self-center" id="hub-actions">
-          <button 
+          <button
             onClick={() => fetchSubscriptionData()}
             className="p-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60 rounded-lg transition-all shadow"
             title="Refresh Metrics"
@@ -857,32 +831,29 @@ export default function SubscriptionBillingHub({
       <div className="max-w-7xl mx-auto mb-8 flex border-b border-slate-800" id="hub-nav">
         <button
           onClick={() => setActiveTab("pricing")}
-          className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${
-            activeTab === "pricing" 
-              ? "border-purple-500 text-purple-400 bg-purple-500/5" 
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
-          }`}
+          className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${activeTab === "pricing"
+            ? "border-purple-500 text-purple-400 bg-purple-500/5"
+            : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
+            }`}
         >
           <Coins className="w-4 h-4" /> Pricing & Model Tiers
         </button>
         <button
           onClick={() => setActiveTab("dashboard")}
-          className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${
-            activeTab === "dashboard" 
-              ? "border-purple-500 text-purple-400 bg-purple-500/5" 
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
-          }`}
+          className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${activeTab === "dashboard"
+            ? "border-purple-500 text-purple-400 bg-purple-500/5"
+            : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"
+            }`}
         >
           <CreditCard className="w-4 h-4" /> Active Billing Dashboard
         </button>
         {profile?.role === "owner_admin" && (
           <button
             onClick={() => setActiveTab("admin")}
-            className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${
-              activeTab === "admin" 
-                ? "border-rose-500 text-rose-400 bg-rose-500/5" 
-                : "border-transparent text-slate-400 hover:text-rose-400 hover:bg-slate-800/30"
-            }`}
+            className={`px-6 py-3 font-semibold text-sm transition-all border-b-2 flex items-center gap-2 ${activeTab === "admin"
+              ? "border-rose-500 text-rose-400 bg-rose-500/5"
+              : "border-transparent text-slate-400 hover:text-rose-400 hover:bg-slate-800/30"
+              }`}
           >
             <Database className="w-4 h-4" /> System Profit Diagnostics
           </button>
@@ -892,7 +863,7 @@ export default function SubscriptionBillingHub({
       {/* 3. Tab Contents */}
       <div className="max-w-7xl mx-auto" id="hub-main-content">
         <AnimatePresence mode="wait">
-          
+
           {/* TAB 1: PRICING PLANS CATALOG */}
           {activeTab === "pricing" && (
             <motion.div
@@ -909,21 +880,19 @@ export default function SubscriptionBillingHub({
                   <div className="bg-slate-900 p-1 rounded-lg border border-slate-700 flex gap-1">
                     <button
                       onClick={() => setCurrency("INR")}
-                      className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${
-                        currency === "INR" 
-                          ? "bg-purple-600 text-white shadow" 
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
+                      className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${currency === "INR"
+                        ? "bg-purple-600 text-white shadow"
+                        : "text-slate-400 hover:text-slate-200"
+                        }`}
                     >
                       ₹ INR (Local)
                     </button>
                     <button
                       onClick={() => setCurrency("USD")}
-                      className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${
-                        currency === "USD" 
-                          ? "bg-purple-600 text-white shadow" 
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
+                      className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${currency === "USD"
+                        ? "bg-purple-600 text-white shadow"
+                        : "text-slate-400 hover:text-slate-200"
+                        }`}
                     >
                       $ USD (Global)
                     </button>
@@ -936,10 +905,9 @@ export default function SubscriptionBillingHub({
                     onClick={() => setIsYearly(!isYearly)}
                     className="w-12 h-6 bg-slate-700 rounded-full p-1 transition-colors duration-200 focus:outline-none relative"
                   >
-                    <div 
-                      className={`w-4 h-4 bg-purple-400 rounded-full transition-all duration-200 shadow ${
-                        isYearly ? "translate-x-6" : "translate-x-0"
-                      }`}
+                    <div
+                      className={`w-4 h-4 bg-purple-400 rounded-full transition-all duration-200 shadow ${isYearly ? "translate-x-6" : "translate-x-0"
+                        }`}
                     />
                   </button>
                   <span className="text-sm text-slate-200 font-semibold flex items-center gap-1.5">
@@ -1019,7 +987,7 @@ export default function SubscriptionBillingHub({
                 {PLANS_LIST.map((plan) => {
                   const Icon = plan.icon;
                   const isCurrent = subscription?.planId === plan.id;
-                  
+
                   // Price Calculation (incorporating dynamic toggles)
                   let displayPrice = "";
                   if (plan.id === "custom_individual") {
@@ -1048,15 +1016,14 @@ export default function SubscriptionBillingHub({
                   }
 
                   return (
-                    <div 
+                    <div
                       key={plan.id}
-                      className={`relative bg-slate-800/40 backdrop-blur-sm rounded-2xl border p-6 flex flex-col justify-between shadow-lg overflow-hidden transition-all duration-300 hover:translate-y-[-4px] hover:shadow-2xl ${
-                        isCurrent 
-                          ? "border-purple-500 shadow-purple-500/10 ring-2 ring-purple-500/25 bg-slate-800/80" 
-                          : plan.isPopular 
-                            ? "border-indigo-500/60 shadow-indigo-500/5 bg-gradient-to-b from-slate-800/80 to-slate-800/40" 
-                            : "border-slate-700/60"
-                      }`}
+                      className={`relative bg-slate-800/40 backdrop-blur-sm rounded-2xl border p-6 flex flex-col justify-between shadow-lg overflow-hidden transition-all duration-300 hover:translate-y-[-4px] hover:shadow-2xl ${isCurrent
+                        ? "border-purple-500 shadow-purple-500/10 ring-2 ring-purple-500/25 bg-slate-800/80"
+                        : plan.isPopular
+                          ? "border-indigo-500/60 shadow-indigo-500/5 bg-gradient-to-b from-slate-800/80 to-slate-800/40"
+                          : "border-slate-700/60"
+                        }`}
                     >
                       {plan.isPopular && (
                         <div className="absolute top-3 right-3 px-2 py-0.5 text-[9px] font-bold bg-indigo-500 text-white rounded uppercase tracking-wider">
@@ -1101,12 +1068,12 @@ export default function SubscriptionBillingHub({
                                 <span>AI Messages</span>
                                 <span className="text-purple-400 font-semibold">{customMsgLimit.toLocaleString()}</span>
                               </div>
-                              <input 
-                                type="range" 
-                                min="1000" 
-                                max="50000" 
+                              <input
+                                type="range"
+                                min="1000"
+                                max="50000"
                                 step="1000"
-                                value={customMsgLimit} 
+                                value={customMsgLimit}
                                 onChange={(e) => setCustomMsgLimit(Number(e.target.value))}
                                 className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                               />
@@ -1116,12 +1083,12 @@ export default function SubscriptionBillingHub({
                                 <span>Creative Units</span>
                                 <span className="text-purple-400 font-semibold">{customCreativeLimit.toLocaleString()}</span>
                               </div>
-                              <input 
-                                type="range" 
-                                min="50" 
-                                max="5000" 
+                              <input
+                                type="range"
+                                min="50"
+                                max="5000"
                                 step="50"
-                                value={customCreativeLimit} 
+                                value={customCreativeLimit}
                                 onChange={(e) => setCustomCreativeLimit(Number(e.target.value))}
                                 className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                               />
@@ -1131,12 +1098,12 @@ export default function SubscriptionBillingHub({
                                 <span>Conversions</span>
                                 <span className="text-purple-400 font-semibold">{customConversionLimit.toLocaleString()}</span>
                               </div>
-                              <input 
-                                type="range" 
-                                min="100" 
-                                max="20000" 
+                              <input
+                                type="range"
+                                min="100"
+                                max="20000"
                                 step="100"
-                                value={customConversionLimit} 
+                                value={customConversionLimit}
                                 onChange={(e) => setCustomConversionLimit(Number(e.target.value))}
                                 className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                               />
@@ -1150,12 +1117,12 @@ export default function SubscriptionBillingHub({
                               <span>Student/Teacher Seats</span>
                               <span className="text-purple-400 font-semibold">{schoolSeats} seats</span>
                             </div>
-                            <input 
-                              type="range" 
-                              min="10" 
-                              max="500" 
+                            <input
+                              type="range"
+                              min="10"
+                              max="500"
                               step="5"
-                              value={schoolSeats} 
+                              value={schoolSeats}
                               onChange={(e) => setSchoolSeats(Number(e.target.value))}
                               className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                             />
@@ -1171,12 +1138,12 @@ export default function SubscriptionBillingHub({
                               <span>Co-worker Seats</span>
                               <span className="text-purple-400 font-semibold">{companySeats} seats</span>
                             </div>
-                            <input 
-                              type="range" 
-                              min="5" 
-                              max="100" 
+                            <input
+                              type="range"
+                              min="5"
+                              max="100"
                               step="1"
-                              value={companySeats} 
+                              value={companySeats}
                               onChange={(e) => setCompanySeats(Number(e.target.value))}
                               className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                             />
@@ -1221,11 +1188,10 @@ export default function SubscriptionBillingHub({
                         ) : (
                           <button
                             onClick={() => initiateCheckout(plan)}
-                            className={`w-full py-2.5 px-4 text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-1 ${
-                              plan.isPopular 
-                                ? "bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white" 
-                                : "bg-purple-600 hover:bg-purple-700 text-white"
-                            }`}
+                            className={`w-full py-2.5 px-4 text-xs font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-1 ${plan.isPopular
+                              ? "bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white"
+                              : "bg-purple-600 hover:bg-purple-700 text-white"
+                              }`}
                           >
                             Upgrade Plan <ArrowRight className="w-3.5 h-3.5" />
                           </button>
@@ -1269,7 +1235,7 @@ export default function SubscriptionBillingHub({
                 <h3 className="text-xl font-bold mb-6 text-slate-100 flex items-center gap-2">
                   <Sliders className="w-5 h-5 text-purple-400" /> Granular Workspace Permission Matrix
                 </h3>
-                
+
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-left text-sm">
                     <thead>
@@ -1346,7 +1312,7 @@ export default function SubscriptionBillingHub({
               <div className="bg-slate-900/90 border border-purple-500/30 rounded-2xl p-6 relative overflow-hidden shadow-2xl shadow-purple-500/5">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
-                
+
                 <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-6">
                   <div className="flex items-start gap-4">
                     <div className="p-3.5 bg-purple-500/10 text-purple-400 rounded-2xl border border-purple-500/20 shadow-inner">
@@ -1359,7 +1325,7 @@ export default function SubscriptionBillingHub({
                       <p className="text-xs text-slate-400 mt-1 max-w-md">
                         AI chains, premium models, search loops, and file operations consume metered platform tokens. Top-up tokens never expire.
                       </p>
-                      
+
                       <div className="flex items-center gap-6 mt-4">
                         <div>
                           <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Available Balance</div>
@@ -1377,7 +1343,7 @@ export default function SubscriptionBillingHub({
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="flex-1 max-w-md bg-slate-950/60 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
                     <div className="space-y-3">
                       <div>
@@ -1388,13 +1354,13 @@ export default function SubscriptionBillingHub({
                           </span>
                         </div>
                         <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-purple-500 rounded-full transition-all duration-500" 
+                          <div
+                            className="h-full bg-purple-500 rounded-full transition-all duration-500"
                             style={{ width: `${tokenWallet ? Math.max(0, Math.min(100, ((tokenWallet.monthly_tokens_total - tokenWallet.monthly_tokens_used) / tokenWallet.monthly_tokens_total) * 100)) : 100}%` }}
                           />
                         </div>
                       </div>
-                      
+
                       {tokenWallet?.topup_tokens_total > 0 && (
                         <div>
                           <div className="flex justify-between text-xs text-slate-400 mb-1">
@@ -1404,15 +1370,15 @@ export default function SubscriptionBillingHub({
                             </span>
                           </div>
                           <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-indigo-500 rounded-full transition-all duration-500" 
+                            <div
+                              className="h-full bg-indigo-500 rounded-full transition-all duration-500"
                               style={{ width: `${Math.max(0, Math.min(100, (((tokenWallet.topup_tokens_total - tokenWallet.topup_tokens_used) / tokenWallet.topup_tokens_total) * 100)))}%` }}
                             />
                           </div>
                         </div>
                       )}
                     </div>
-                    
+
                     <button
                       onClick={() => setShowTopupModal(true)}
                       className="mt-4 w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 shadow"
@@ -1501,7 +1467,7 @@ export default function SubscriptionBillingHub({
                     const max = getActivePlanMax(config.maxKey);
                     const isAdmin = profile?.role === "owner_admin";
                     const percentage = isAdmin ? 0 : (max > 0 ? Math.min(100, Math.round((current / max) * 100)) : 0);
-                    
+
                     // Gauge Color level indicator
                     let barColor = "bg-purple-500";
                     let textColor = "text-purple-400";
@@ -1521,14 +1487,14 @@ export default function SubscriptionBillingHub({
                             {isAdmin ? `${current.toLocaleString()} / Unlimited` : (max === 0 ? "Blocked (0)" : `${current.toLocaleString()} / ${max.toLocaleString()}`)}
                           </span>
                         </div>
-                        
+
                         <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${barColor}`} 
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
                             style={{ width: `${isAdmin ? 0 : (max === 0 ? 0 : percentage)}%` }}
                           />
                         </div>
-                        
+
                         <div className="flex justify-between text-[10px] text-slate-500">
                           <span>{isAdmin ? "0% Consumed (Admin Free Plan)" : (max === 0 ? "Plan restricted" : `${percentage}% Consumed`)}</span>
                           {!isAdmin && max > 0 && current >= max && (
@@ -1569,7 +1535,7 @@ export default function SubscriptionBillingHub({
                       <form onSubmit={handleAddOrgMember} className="space-y-4">
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">Full Name</label>
-                          <input 
+                          <input
                             type="text"
                             placeholder="e.g. Rachel Dawes"
                             value={newMemberName}
@@ -1580,7 +1546,7 @@ export default function SubscriptionBillingHub({
                         </div>
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">Email Address</label>
-                          <input 
+                          <input
                             type="email"
                             placeholder="rachel@gotham.org"
                             value={newMemberEmail}
@@ -1591,7 +1557,7 @@ export default function SubscriptionBillingHub({
                         </div>
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">Workspace Assignment Role</label>
-                          <select 
+                          <select
                             value={newMemberRole}
                             onChange={(e) => setNewMemberRole(e.target.value)}
                             className="w-full px-3 py-2 bg-slate-850 border border-slate-700/60 rounded-lg text-xs text-slate-100 focus:outline-none focus:border-purple-500"
@@ -1601,7 +1567,7 @@ export default function SubscriptionBillingHub({
                             <option value="Billing Manager">Billing Manager</option>
                           </select>
                         </div>
-                        <button 
+                        <button
                           type="submit"
                           className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg text-xs transition-all shadow-md"
                         >
@@ -1640,7 +1606,7 @@ export default function SubscriptionBillingHub({
                                 </td>
                                 <td className="py-2.5 text-right">
                                   {member.user_id !== profile?.id ? (
-                                    <button 
+                                    <button
                                       onClick={() => handleRemoveOrgMember(member.id)}
                                       className="p-1.5 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg transition-all"
                                       title="Revoke Seat Allocation"
@@ -1739,7 +1705,7 @@ export default function SubscriptionBillingHub({
             >
               {/* Profit Guard Diagnostics and Alerts Dashboard */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="diagnostics-summary-grid">
-                
+
                 {/* Profit Gauge Card */}
                 <div className="lg:col-span-1 bg-slate-800/40 rounded-xl border border-slate-700/60 p-5 shadow space-y-4">
                   <div className="flex items-center gap-3">
@@ -1756,14 +1722,14 @@ export default function SubscriptionBillingHub({
                     <div className="relative flex items-center justify-center">
                       {/* SVG Gauge Circle */}
                       <svg className="w-32 h-32 transform -rotate-90">
-                        <circle 
-                          cx="64" cy="64" r="50" 
-                          className="stroke-slate-800" strokeWidth="8" fill="transparent" 
+                        <circle
+                          cx="64" cy="64" r="50"
+                          className="stroke-slate-800" strokeWidth="8" fill="transparent"
                         />
-                        <circle 
-                          cx="64" cy="64" r="50" 
-                          className="stroke-purple-500 transition-all duration-1000" 
-                          strokeWidth="8" fill="transparent" 
+                        <circle
+                          cx="64" cy="64" r="50"
+                          className="stroke-purple-500 transition-all duration-1000"
+                          strokeWidth="8" fill="transparent"
                           strokeDasharray={2 * Math.PI * 50}
                           strokeDashoffset={(2 * Math.PI * 50) * (1 - profitMarginPercent / 100)}
                         />
@@ -1776,8 +1742,8 @@ export default function SubscriptionBillingHub({
                   </div>
 
                   <div className="text-[10px] leading-relaxed text-slate-400">
-                    Calculated Intake: <strong className="text-slate-200">${planPriceUsd.toFixed(2)}</strong>. 
-                    Simulated API Outflow: <strong className="text-slate-200">${currentApiCostTotal.toFixed(4)}</strong>. 
+                    Calculated Intake: <strong className="text-slate-200">${planPriceUsd.toFixed(2)}</strong>.
+                    Simulated API Outflow: <strong className="text-slate-200">${currentApiCostTotal.toFixed(4)}</strong>.
                     Target profit margin remains protected.
                   </div>
                 </div>
@@ -1801,11 +1767,10 @@ export default function SubscriptionBillingHub({
                         <div className="font-semibold text-slate-200">35% Cost Margin Alert</div>
                         <p className="text-[9px] text-slate-400">Internal warning banner displays in workspace logs.</p>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                        apiCostPercentTotal >= 35 
-                          ? "bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse" 
-                          : "bg-slate-800 text-slate-500"
-                      }`}>
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${apiCostPercentTotal >= 35
+                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse"
+                        : "bg-slate-800 text-slate-500"
+                        }`}>
                         {apiCostPercentTotal >= 35 ? "TRIGGERED" : "NOMINAL"}
                       </span>
                     </div>
@@ -1816,11 +1781,10 @@ export default function SubscriptionBillingHub({
                         <div className="font-semibold text-slate-200">50% Priority Throttling</div>
                         <p className="text-[9px] text-slate-400">Throttles heavy bulk tasks; forces standard priority queue.</p>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                        apiCostPercentTotal >= 50 
-                          ? "bg-orange-500/20 text-orange-400 border border-orange-500/30 animate-pulse" 
-                          : "bg-slate-800 text-slate-500"
-                      }`}>
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${apiCostPercentTotal >= 50
+                        ? "bg-orange-500/20 text-orange-400 border border-orange-500/30 animate-pulse"
+                        : "bg-slate-800 text-slate-500"
+                        }`}>
                         {apiCostPercentTotal >= 50 ? "TRIGGERED" : "NOMINAL"}
                       </span>
                     </div>
@@ -1831,11 +1795,10 @@ export default function SubscriptionBillingHub({
                         <div className="font-semibold text-slate-200">80% Core Safeguard Lockout</div>
                         <p className="text-[9px] text-slate-400">Strictly blocks heavy model operations. Requires upgrade.</p>
                       </div>
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                        apiCostPercentTotal >= 80 
-                          ? "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse" 
-                          : "bg-slate-800 text-slate-500"
-                      }`}>
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${apiCostPercentTotal >= 80
+                        ? "bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse"
+                        : "bg-slate-800 text-slate-500"
+                        }`}>
                         {apiCostPercentTotal >= 80 ? "TRIGGERED" : "NOMINAL"}
                       </span>
                     </div>
@@ -1965,7 +1928,7 @@ export default function SubscriptionBillingHub({
       {/* 4. MODAL: Stripe & Razorpay Checkout Portal Simulator */}
       {checkoutPlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md" id="checkout-overlay">
-          <motion.div 
+          <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             className="w-full max-w-md bg-slate-900 rounded-2xl border border-slate-850 shadow-2xl overflow-hidden p-6"
@@ -1979,7 +1942,7 @@ export default function SubscriptionBillingHub({
                 </span>
                 <h3 className="text-lg font-bold text-white mt-1">Upgrade Workstation Allocation</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setCheckoutPlan(null)}
                 className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-all"
               >
@@ -2089,7 +2052,7 @@ export default function SubscriptionBillingHub({
                   </p>
                 </div>
 
-                <button 
+                <button
                   onClick={async () => {
                     try {
                       const order = await createRazorpayOrder(checkoutPlan.id);
@@ -2227,7 +2190,7 @@ export default function SubscriptionBillingHub({
                             if (!res.ok || !data.success) {
                               throw new Error(data.message || "Order creation failed on backend");
                             }
-                            
+
                             // Open Razorpay frame
                             await openRazorpayCheckout(data, { name: pack.name });
                           } catch (err: any) {

@@ -148,14 +148,14 @@ export const keySwitchLogs: Array<{
 API_PROVIDERS_CONFIG.forEach(provider => {
   const currentFilled = !!(process.env[provider.currentKeyEnv] || (provider.fallbackEnv && process.env[provider.fallbackEnv]));
   const backupFilledCount = provider.backupKeyEnvs.filter(env => !!process.env[env]).length;
-  
+
   let initialStatus = "Missing";
   if (currentFilled) {
     initialStatus = "Active";
   } else if (backupFilledCount > 0) {
     initialStatus = "Backup Ready";
   }
-  
+
   providerRuntimeStatus[provider.id] = {
     activeKeyIndex: 0,
     status: initialStatus,
@@ -168,7 +168,7 @@ API_PROVIDERS_CONFIG.forEach(provider => {
 export function getActiveApiKey(providerId: string): string | null {
   const config = API_PROVIDERS_CONFIG.find(p => p.id === providerId);
   if (!config) return null;
-  
+
   const state = providerRuntimeStatus[providerId];
   if (!state) return null;
 
@@ -193,7 +193,7 @@ export function handleKeyFailure(providerId: string, errorMsg: string): boolean 
 
   const oldIndex = state.activeKeyIndex;
   const isRateLimit = errorMsg.toLowerCase().includes("rate") || errorMsg.toLowerCase().includes("429") || errorMsg.toLowerCase().includes("quota");
-  
+
   state.lastError = errorMsg;
   state.status = isRateLimit ? "Rate Limited" : "Failed";
 
@@ -219,7 +219,7 @@ export function handleKeyFailure(providerId: string, errorMsg: string): boolean 
   if (foundIndex !== -1) {
     state.activeKeyIndex = foundIndex;
     state.status = "Active"; // mark as active again since we found a backup
-    
+
     const event = {
       id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toISOString(),
@@ -230,7 +230,7 @@ export function handleKeyFailure(providerId: string, errorMsg: string): boolean 
       newIndex: foundIndex,
       message: `Primary/backup key index ${oldIndex} failed (${errorMsg}). Automatically failing over and activating Backup Key ${foundIndex}.`
     };
-    
+
     keySwitchLogs.unshift(event);
     console.log(`[KeyManager] Failover activated for ${config.name}: Index ${oldIndex} -> ${foundIndex}`);
     return true;
@@ -302,11 +302,11 @@ export async function executeWithAutomaticKeyRotation<T>(
 
     try {
       const result = await operation(apiKey);
-      
+
       // Update status to Active upon success
       state.status = "Active";
       state.lastError = "";
-      
+
       return result;
     } catch (err: any) {
       attempt++;
@@ -314,13 +314,13 @@ export async function executeWithAutomaticKeyRotation<T>(
       const errStatus = err?.status || err?.code || err?.statusCode || (err?.response && err?.response.status) || 0;
 
       // Detect authorization / validation issues (401, 403, invalid key keywords)
-      const isAuthError = errStatus === 401 || errStatus === 403 || 
-                          errMessage.includes("api key") || 
-                          errMessage.includes("invalid key") || 
-                          errMessage.includes("unauthorized") ||
-                          errMessage.includes("key_expired") ||
-                          errMessage.includes("forbidden") ||
-                          errMessage.includes("invalid_api_key");
+      const isAuthError = errStatus === 401 || errStatus === 403 ||
+        errMessage.includes("api key") ||
+        errMessage.includes("invalid key") ||
+        errMessage.includes("unauthorized") ||
+        errMessage.includes("key_expired") ||
+        errMessage.includes("forbidden") ||
+        errMessage.includes("invalid_api_key");
 
       if (isAuthError && attempt < maxAttempts) {
         console.warn(`[KeyManager] Auth/Key failure (status: ${errStatus}) detected for provider "${providerId}": "${errMessage}". Cycling to next backup key...`);
@@ -388,16 +388,16 @@ async function robustGenerateContent(params: any): Promise<any> {
         lastError = err;
         const errMessage = String(err?.message || "").toLowerCase();
         const errStatus = err?.status || err?.code || 0;
-        
+
         // Check if it's an API Key or rate-limit or quota error to trigger dynamic failover
         const isKeyOrQuotaError = errStatus === 401 || errStatus === 403 || errStatus === 429 ||
-                                  errMessage.includes("api key") || 
-                                  errMessage.includes("invalid key") || 
-                                  errMessage.includes("quota") || 
-                                  errMessage.includes("key_expired") ||
-                                  errMessage.includes("rate limit") ||
-                                  errMessage.includes("blocked");
-                                  
+          errMessage.includes("api key") ||
+          errMessage.includes("invalid key") ||
+          errMessage.includes("quota") ||
+          errMessage.includes("key_expired") ||
+          errMessage.includes("rate limit") ||
+          errMessage.includes("blocked");
+
         if (isKeyOrQuotaError) {
           console.warn(`[KeyManager] Detected key failure on Gemini API: "${errMessage}". Triggering backup failover...`);
           const activatedBackup = handleKeyFailure("gemini", err.message || "API key error or quota exceeded");
@@ -408,13 +408,13 @@ async function robustGenerateContent(params: any): Promise<any> {
           }
         }
 
-        const isTransient = errStatus === 503 || errStatus === 429 || 
-                            errMessage.includes("503") || 
-                            errMessage.includes("429") || 
-                            errMessage.includes("temporary") || 
-                            errMessage.includes("unavailable") ||
-                            errMessage.includes("high demand") ||
-                            errMessage.includes("overloaded");
+        const isTransient = errStatus === 503 || errStatus === 429 ||
+          errMessage.includes("503") ||
+          errMessage.includes("429") ||
+          errMessage.includes("temporary") ||
+          errMessage.includes("unavailable") ||
+          errMessage.includes("high demand") ||
+          errMessage.includes("overloaded");
 
         if (isTransient && retries > 0) {
           console.warn(`Transient error calling ${model} (${errMessage || errStatus}), retrying in ${delayMs}ms. Retries left: ${retries}`);
@@ -768,107 +768,95 @@ const initialDB: LocalDB = {
   ]
 };
 
-// In-memory DB cache — persists changes within the server process lifetime.
-// On Vercel (read-only filesystem), file writes are silently ignored, but the
-// in-memory cache ensures changes (like redeem code activations) survive
-// within a warm serverless instance. On a persistent Node server, file writes
-// work as normal AND the cache provides fast reads.
-let _dbCache: LocalDB | null = null;
-
 function readDB(): LocalDB {
-  // Return in-memory cache if available (fastest path)
-  if (_dbCache) return _dbCache;
-
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify(initialDB, null, 2));
+    return initialDB;
+  }
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const data = fs.readFileSync(DB_FILE, "utf-8");
-      const parsed = JSON.parse(data) as LocalDB;
-      _dbCache = _hydrateDB(parsed);
-      return _dbCache;
+    const data = fs.readFileSync(DB_FILE, "utf-8");
+    const parsed = JSON.parse(data);
+    if (!parsed.conversionHistory) parsed.conversionHistory = [];
+    if (!parsed.savedFiles) parsed.savedFiles = [];
+    if (!parsed.investmentReports) parsed.investmentReports = [];
+
+    // Inject Compatibility Properties for Billing & Subscription System
+    if (!parsed.profile) parsed.profile = { ...initialDB.profile };
+    if (!parsed.profile.role) parsed.profile.role = "owner_admin"; // owner_admin by default to ensure admin section is immediately visible/testable
+
+    if (!parsed.subscription) {
+      parsed.subscription = { ...initialDB.subscription };
     }
+    if (!parsed.usageTracking) {
+      parsed.usageTracking = { ...initialDB.usageTracking };
+    }
+    if (!parsed.billingEvents) {
+      parsed.billingEvents = [...initialDB.billingEvents];
+    }
+    if (!parsed.organizationAccount) {
+      parsed.organizationAccount = null;
+    }
+    if (!parsed.teamMembers) {
+      parsed.teamMembers = [];
+    }
+    if (!parsed.apiCostLogs) {
+      parsed.apiCostLogs = [...initialDB.apiCostLogs];
+    }
+    if (!parsed.redeemCodes) {
+      parsed.redeemCodes = [...initialDB.redeemCodes!];
+    }
+
+    // Initialize new token billing collections
+    if (!parsed.token_wallets) parsed.token_wallets = [];
+    if (!parsed.token_ledger) parsed.token_ledger = [];
+    if (!parsed.usage_events) parsed.usage_events = [];
+    if (!parsed.razorpay_orders) parsed.razorpay_orders = [];
+    if (!parsed.webhook_events) parsed.webhook_events = [];
+    if (!parsed.jobs) parsed.jobs = [];
+
+    // Pre-seed active wallet for main user-1 profile
+    const wallet = parsed.token_wallets.find((w: any) => w.user_id === "user-1");
+    if (!wallet) {
+      const planId = parsed.subscription?.planId || "free_trial";
+      const plan = {
+        free_trial: 150,
+        starter: 1200,
+        pro: 2800,
+        ultra: 8000,
+        custom_individual: 15000,
+        school: 20000,
+        company: 50000,
+        enterprise: 500000
+      }[planId] || 150;
+
+      parsed.token_wallets.push({
+        id: `wallet-${Date.now()}`,
+        user_id: "user-1",
+        organization_id: parsed.organizationAccount?.id || null,
+        monthly_tokens_total: plan,
+        monthly_tokens_used: 0,
+        topup_tokens_total: 0,
+        topup_tokens_used: 0,
+        reserved_tokens: 0,
+        available_tokens: plan,
+        billing_cycle_start: new Date().toISOString(),
+        billing_cycle_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        updated_at: new Date().toISOString()
+      });
+    }
+
+    return parsed;
   } catch (err) {
-    console.error("Error reading database file, using initial schema:", err);
+    console.error("Error reading database file, returning initial schema:", err);
+    return initialDB;
   }
-
-  // Fall back to fresh initialDB (deep clone so mutations don't corrupt the template)
-  _dbCache = _hydrateDB(JSON.parse(JSON.stringify(initialDB)));
-  // Best-effort write to disk (no-op on Vercel read-only FS)
-  try { fs.writeFileSync(DB_FILE, JSON.stringify(_dbCache, null, 2)); } catch (_) {}
-  return _dbCache;
-}
-
-function _hydrateDB(parsed: any): LocalDB {
-  if (!parsed.conversionHistory) parsed.conversionHistory = [];
-  if (!parsed.savedFiles) parsed.savedFiles = [];
-  if (!parsed.investmentReports) parsed.investmentReports = [];
-
-  // Compatibility Properties for Billing & Subscription System
-  if (!parsed.profile) parsed.profile = { ...initialDB.profile };
-  if (!parsed.profile.role) parsed.profile.role = "owner_admin";
-
-  if (!parsed.subscription) parsed.subscription = { ...(initialDB.subscription as any) };
-  if (!parsed.usageTracking) parsed.usageTracking = { ...(initialDB.usageTracking as any) };
-  if (!parsed.billingEvents) parsed.billingEvents = [ ...initialDB.billingEvents! ];
-  if (!parsed.organizationAccount) parsed.organizationAccount = null;
-  if (!parsed.teamMembers) parsed.teamMembers = [];
-  if (!parsed.apiCostLogs) parsed.apiCostLogs = [ ...initialDB.apiCostLogs! ];
-
-  // Always ensure hardcoded redeem codes exist, merging any extras from file
-  const hardcoded: LocalDB["redeemCodes"] = JSON.parse(JSON.stringify(initialDB.redeemCodes!));
-  if (!parsed.redeemCodes) {
-    parsed.redeemCodes = hardcoded;
-  } else {
-    // Merge: keep file-persisted usesCount/usedBy but guarantee all hardcoded codes exist
-    for (const hc of hardcoded) {
-      const existing = parsed.redeemCodes.find((rc: any) => rc.code === hc.code);
-      if (!existing) parsed.redeemCodes.push(hc);
-    }
-  }
-
-  // Token billing collections
-  if (!parsed.token_wallets) parsed.token_wallets = [];
-  if (!parsed.token_ledger) parsed.token_ledger = [];
-  if (!parsed.usage_events) parsed.usage_events = [];
-  if (!parsed.razorpay_orders) parsed.razorpay_orders = [];
-  if (!parsed.webhook_events) parsed.webhook_events = [];
-  if (!parsed.jobs) parsed.jobs = [];
-
-  // Pre-seed wallet for main user
-  const wallet = parsed.token_wallets.find((w: any) => w.user_id === "user-1");
-  if (!wallet) {
-    const planId = parsed.subscription?.planId || "free_trial";
-    const tokenMap: Record<string, number> = {
-      free_trial: 150, starter: 1200, pro: 2800, ultra: 8000,
-      custom_individual: 15000, school: 20000, company: 50000, enterprise: 500000
-    };
-    const plan = tokenMap[planId] ?? 150;
-    parsed.token_wallets.push({
-      id: `wallet-${Date.now()}`,
-      user_id: "user-1",
-      organization_id: parsed.organizationAccount?.id || null,
-      monthly_tokens_total: plan,
-      monthly_tokens_used: 0,
-      topup_tokens_total: 0,
-      topup_tokens_used: 0,
-      reserved_tokens: 0,
-      available_tokens: plan,
-      billing_cycle_start: new Date().toISOString(),
-      billing_cycle_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-      updated_at: new Date().toISOString()
-    });
-  }
-
-  return parsed as LocalDB;
 }
 
 function writeDB(db: LocalDB) {
-  // Always update in-memory cache first — this is the primary store on Vercel
-  _dbCache = db;
-  // Best-effort disk write (works on persistent servers, silently no-ops on Vercel read-only FS)
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
   } catch (err) {
-    console.warn("writeDB: Could not write to disk (read-only FS?). Changes are held in memory.", err);
+    console.error("Error writing to database:", err);
   }
 }
 
@@ -1341,7 +1329,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
 
   const idx = state.activeKeyIndex;
   let envName = idx === 0 ? config.currentKeyEnv : config.backupKeyEnvs[idx - 1];
-  let keyVal = idx === 0 
+  let keyVal = idx === 0
     ? (process.env[config.currentKeyEnv] || (config.fallbackEnv ? process.env[config.fallbackEnv] : undefined))
     : process.env[envName];
 
@@ -1351,7 +1339,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
   if (simulateFailure) {
     const errorMsg = "Simulated QuotaExceededError: Rate limit of 15 RPM hit on active key endpoint.";
     const activatedBackup = handleKeyFailure(providerId, errorMsg);
-    
+
     return res.json({
       success: false,
       message: `Simulated failure on key index ${idx}. Active index was moved.`,
@@ -1375,7 +1363,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
 
   // Simulate or verify key format
   const isKeyValid = keyVal.length > 8 && !keyVal.includes("YOUR_") && !keyVal.includes("PASTE_");
-  
+
   if (!isKeyValid) {
     const errorMsg = "InvalidKeyError: Key signature is malformed or contains placeholder text.";
     const activatedBackup = handleKeyFailure(providerId, errorMsg);
@@ -1392,7 +1380,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
   // Success!
   state.status = "Active";
   state.lastError = "";
-  
+
   const logEvent = {
     id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     timestamp: new Date().toISOString(),
@@ -1427,12 +1415,12 @@ app.post("/api/keys/update-priority", (req, res) => {
 
   const oldIndex = state.activeKeyIndex;
   state.activeKeyIndex = Number(targetIndex);
-  
+
   // Update status based on existence of selected key
-  let keyVal = targetIndex === 0 
+  let keyVal = targetIndex === 0
     ? (process.env[config.currentKeyEnv] || (config.fallbackEnv ? process.env[config.fallbackEnv] : undefined))
     : process.env[config.backupKeyEnvs[targetIndex - 1]];
-    
+
   if (keyVal) {
     state.status = "Active";
     state.lastError = "";
@@ -1476,7 +1464,7 @@ app.post("/api/keys/clear-logs", (req, res) => {
 app.get("/api/climate/storm-data", async (req, res) => {
   const stormGlassKey = process.env.STORMGLASS_API_KEY_CURRENT || process.env.STORMGLASS_API_KEY;
   const isKeyActive = !!(stormGlassKey && stormGlassKey.length > 8);
-  
+
   // High-fidelity active storm tracks (simulated and live tracker models)
   const baseStorms = [
     {
@@ -1588,15 +1576,15 @@ app.post("/api/climate/nvidia-forecast", async (req, res) => {
 
   // Let's generate a highly technical meteorological simulation response
   // representing NVIDIA Modulus/FourCastNet AI-driven physics predictions.
-  
+
   // Calculate relative base values based on coordinates
   // Equator is hot, poles are cold
   const distFromEquator = Math.abs(latitude) / 90;
   const baseTemp = 32 - (distFromEquator * 45) + (parseFloat(temperatureFactor || 0) * 15);
-  
+
   // Winds are generally higher at specific jet streams
   const baseWind = 12 + (Math.sin(latitude * Math.PI / 45) * 10) + (parseFloat(windFactor || 0) * 55);
-  
+
   // Precipitation is higher in equatorial tropics (lat 0) and temperate zones
   const baseRain = Math.max(0, (200 - Math.abs(latitude) * 2) * (parseFloat(rainfallFactor || 0) * 1.5));
 
@@ -1670,7 +1658,7 @@ app.post("/api/climate/nvidia-forecast", async (req, res) => {
 app.get("/api/climate/earth2/status", (req, res) => {
   const repoPath = path.join(process.cwd(), "earth2-weather-analytics");
   const exists = fs.existsSync(repoPath);
-  
+
   let files: string[] = [];
   if (exists) {
     try {
@@ -1696,7 +1684,7 @@ app.get("/api/climate/earth2/status", (req, res) => {
 
 app.post("/api/climate/earth2/clone", (req, res) => {
   const repoPath = path.join(process.cwd(), "earth2-weather-analytics");
-  
+
   try {
     if (!fs.existsSync(repoPath)) {
       fs.mkdirSync(repoPath, { recursive: true });
@@ -1812,7 +1800,7 @@ app.post("/api/climate/earth2/run", (req, res) => {
 
   // Let's generate physics-grounded weather data based on coordinate math
   const distFromEquator = Math.abs(targetLat) / 90;
-  
+
   // Base hourly values with variation curves
   const records = [];
   const now = new Date();
@@ -1820,14 +1808,14 @@ app.post("/api/climate/earth2/run", (req, res) => {
   for (let i = 0; i < numSteps; i++) {
     const hourTime = new Date(now.getTime() + i * 3600000);
     const hourOfDay = hourTime.getHours();
-    
+
     // diurnal variation (warm in afternoon, cold at night)
-    const diurnalFactor = Math.sin((hourOfDay - 6) / 24 * 2 * Math.PI); 
-    
+    const diurnalFactor = Math.sin((hourOfDay - 6) / 24 * 2 * Math.PI);
+
     // Base temperature calculation
     const tempBase = 28 - (distFromEquator * 32) + (diurnalFactor * 4.5);
     const calculatedTemp = parseFloat(tempBase.toFixed(1));
-    
+
     // Wind speeds vary randomly, higher at poles and mid-latitudes
     const windBase = 8 + Math.abs(Math.sin(targetLat * Math.PI / 45)) * 12 + Math.sin(i / 10) * 4;
     const calculatedWind = parseFloat(windBase.toFixed(1));
@@ -2048,7 +2036,7 @@ function getSimulatedAirspaceStates(lamin: number, lomin: number, lamax: number,
       destLat = dest.lat;
       destLon = dest.lon;
     }
-    
+
     // Calculate distance and heading
     const dy = destLat - f.lat;
     const dx = destLon - f.lon;
@@ -2089,7 +2077,7 @@ function getSimulatedAirspaceStates(lamin: number, lomin: number, lamax: number,
     // Update lat/lon
     f.lat += (dy / dist) * step;
     f.lon += (dx / dist) * step;
-    
+
     // Slight fluctuation in altitude
     f.altitude += Math.floor((Math.random() - 0.5) * 50);
     if (f.altitude < 3000) f.altitude = 3000;
@@ -2188,7 +2176,7 @@ app.get("/api/airspace/states", async (req, res) => {
   try {
     const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
     console.log(`[Proxy] Fetching airspace states from OpenSky: ${url}`);
-    
+
     const headers: Record<string, string> = {
       "Accept": "application/json",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -2401,7 +2389,7 @@ app.post("/api/convert-file", async (req, res) => {
   if (apiKey && !isMockKey) {
     try {
       console.log(`CloudConvert executing real conversion via API: ${fileName} -> ${targetFormat}`);
-      
+
       // Clean base64 prefix if present
       let cleanBase64 = base64;
       if (base64.includes(";base64,")) {
@@ -2531,7 +2519,7 @@ app.post("/api/convert-file", async (req, res) => {
 
   // Real Local File Conversion if no API key or on error fallback
   console.log(`CloudConvert executing local/fallback conversion: ${fileName} (${fileType}) -> ${targetFormat}`);
-  
+
   let convertedBase64 = base64;
   let isConvertedLocally = false;
   let cleanBase64 = base64;
@@ -2552,10 +2540,10 @@ app.post("/api/convert-file", async (req, res) => {
         const { width, height } = page.getSize();
         const fontSize = 11;
         const margin = 50;
-        
+
         const lines = textContent.split(/\r?\n/);
         let currentY = height - margin;
-        
+
         for (const line of lines) {
           if (currentY < margin + fontSize) {
             page = pdfDoc.addPage();
@@ -2571,7 +2559,7 @@ app.post("/api/convert-file", async (req, res) => {
           });
           currentY -= fontSize * 1.45;
         }
-        
+
         const pdfBytes = await pdfDoc.save();
         convertedBase64 = Buffer.from(pdfBytes).toString("base64");
         isConvertedLocally = true;
@@ -2580,16 +2568,16 @@ app.post("/api/convert-file", async (req, res) => {
       } else if (inputExt === "docx") {
         const docxResult = await mammoth.extractRawText({ buffer: rawBuffer });
         const textContent = docxResult.value || "Empty Word Document";
-        
+
         const pdfDoc = await PDFDocument.create();
         let page = pdfDoc.addPage();
         const { width, height } = page.getSize();
         const fontSize = 11;
         const margin = 50;
-        
+
         const lines = textContent.split(/\r?\n/);
         let currentY = height - margin;
-        
+
         for (const line of lines) {
           if (currentY < margin + fontSize) {
             page = pdfDoc.addPage();
@@ -2604,7 +2592,7 @@ app.post("/api/convert-file", async (req, res) => {
           });
           currentY -= fontSize * 1.45;
         }
-        
+
         const pdfBytes = await pdfDoc.save();
         convertedBase64 = Buffer.from(pdfBytes).toString("base64");
         isConvertedLocally = true;
@@ -2614,28 +2602,28 @@ app.post("/api/convert-file", async (req, res) => {
         const pdfDoc = await PDFDocument.create();
         const page = pdfDoc.addPage();
         const { width: pageWidth, height: pageHeight } = page.getSize();
-        
+
         let embeddedImage;
         if (inputExt === "png") {
           embeddedImage = await pdfDoc.embedPng(rawBuffer);
         } else {
           embeddedImage = await pdfDoc.embedJpg(rawBuffer);
         }
-        
+
         const { width: imgWidth, height: imgHeight } = embeddedImage.scale(1);
         const scale = Math.min(pageWidth / imgWidth, pageHeight / imgHeight, 1);
         const finalWidth = imgWidth * scale;
         const finalHeight = imgHeight * scale;
         const x = (pageWidth - finalWidth) / 2;
         const y = (pageHeight - finalHeight) / 2;
-        
+
         page.drawImage(embeddedImage, {
           x,
           y,
           width: finalWidth,
           height: finalHeight,
         });
-        
+
         const pdfBytes = await pdfDoc.save();
         convertedBase64 = Buffer.from(pdfBytes).toString("base64");
         isConvertedLocally = true;
@@ -2711,8 +2699,8 @@ app.post("/api/convert-file", async (req, res) => {
     agentName: "Local Converter Core",
     taskType: "file_conversion",
     tokensUsed: 1000,
-    description: isConvertedLocally 
-      ? `Real local conversion: ${fileName} to ${targetFormat} (processed locally)` 
+    description: isConvertedLocally
+      ? `Real local conversion: ${fileName} to ${targetFormat} (processed locally)`
       : `Simulated conversion fallback: ${fileName} to ${targetFormat}`,
     createdAt: new Date().toISOString(),
   });
@@ -3073,12 +3061,12 @@ app.post("/api/chats/:id/messages", async (req, res) => {
   // SECURE ANTI-LOOPHOLE TOKEN GATING & RESERVATION
   const isPremiumModel = chosenAgent.id !== "agent-gpt-gemini";
   const fileMb = file ? Math.ceil((Buffer.from(file.base64, "base64").length) / (1024 * 1024)) : 0;
-  
+
   const gateCheck = billingSystem.verifyLimitsAndAccess("user-1", "intelligence_core", "quick_chat", {
     isPremiumModel,
     fileSizeMb: fileMb
   });
-  
+
   if (!gateCheck.allowed) {
     db.messages = db.messages.filter((m: any) => m.id !== userMsgId);
     writeDB(db);
@@ -3092,7 +3080,7 @@ app.post("/api/chats/:id/messages", async (req, res) => {
   const inputLenEst = (content || "").length;
   const inputTokensEst = Math.ceil(inputLenEst / 4);
   const outputTokensEst = (taskType === "coding" || taskType === "debugging") ? 600 : 250;
-  
+
   const estRawCostUsd = calculateRawProviderCost(
     chosenAgent.provider || "Google",
     chosenAgent.id,
@@ -3101,10 +3089,10 @@ app.post("/api/chats/:id/messages", async (req, res) => {
       outputTokens: outputTokensEst
     }
   );
-  
+
   // Convert USD cost to platform tokens (matching billing system formula)
   const estCostBasedTokens = Math.ceil((estRawCostUsd * 83 * 2.5) / 1.5);
-  
+
   // Define a safe base floor matching rate card to prevent zero estimates
   let minRate = 2;
   if (taskType === "coding" || taskType === "debugging") {
@@ -3112,9 +3100,9 @@ app.post("/api/chats/:id/messages", async (req, res) => {
   } else if (chosenAgent.id === "agent-claude" || chosenAgent.id === "agent-grok") {
     minRate = 15;
   }
-  
+
   const estimatedTokens = Math.max(minRate, estCostBasedTokens);
-  
+
   const reservation = billingSystem.reserveTokensForAction("user-1", "intelligence_core", "quick_chat", estimatedTokens);
   if (!reservation.success) {
     db.messages = db.messages.filter((m: any) => m.id !== userMsgId);
@@ -3261,7 +3249,7 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
             },
           });
         } else if (
-          mime.includes("officedocument.wordprocessingml.document") || 
+          mime.includes("officedocument.wordprocessingml.document") ||
           filename.endsWith(".docx")
         ) {
           try {
@@ -3279,12 +3267,12 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
             });
           }
         } else if (
-          mime.startsWith("text/") || 
-          filename.endsWith(".txt") || 
-          filename.endsWith(".json") || 
-          filename.endsWith(".csv") || 
-          filename.endsWith(".js") || 
-          filename.endsWith(".ts") || 
+          mime.startsWith("text/") ||
+          filename.endsWith(".txt") ||
+          filename.endsWith(".json") ||
+          filename.endsWith(".csv") ||
+          filename.endsWith(".js") ||
+          filename.endsWith(".ts") ||
           filename.endsWith(".md")
         ) {
           try {
@@ -3374,16 +3362,16 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
           const targetModel = isMinimax ? "minimaxai/minimax-m3" : "moonshotai/kimi-k2.6";
           const maxTokensToUse = isMinimax ? 8192 : 4096;
           const topPToUse = isMinimax ? 0.95 : 1.0;
-          
+
           console.log(`[NVIDIA API] Invoking real NVIDIA AI Endpoints with model ${targetModel}...`);
-          
+
           // Construct messages for OpenAI format
           const openAIMessages: any[] = [];
-          
+
           if (systemPrompt) {
             openAIMessages.push({ role: "system", content: systemPrompt });
           }
-          
+
           for (const m of lastPriorMessages) {
             let msgContent: any = m.content || "";
             // If MiniMax and message has a valid image/video file, form multimodal payload
@@ -3407,7 +3395,7 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
               content: msgContent
             });
           }
-          
+
           // Add the current user message
           let currentMsgContent: any = content || "Analyze my uploaded attachment.";
           if (isMinimax && file && file.base64) {
@@ -3430,7 +3418,7 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
             role: "user",
             content: currentMsgContent
           });
- 
+
           // Fetch from NVIDIA
           const nvidiaResponse = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
             method: "POST",
@@ -3446,23 +3434,23 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
               max_tokens: maxTokensToUse
             })
           });
- 
+
           if (!nvidiaResponse.ok) {
             const errBody = await nvidiaResponse.text();
             throw new Error(`NVIDIA API responded with status ${nvidiaResponse.status}: ${errBody}`);
           }
- 
+
           const nvidiaData = await nvidiaResponse.json();
           const choice = nvidiaData.choices?.[0];
           let textResult = choice?.message?.content || "";
-          
+
           // Support reasoning_content in response (kimi-k2.6 or other models)
           const reasoningContent = choice?.message?.reasoning_content || choice?.message?.thinking || "";
           if (reasoningContent) {
             console.log(`[NVIDIA API] Reasoning detected with length: ${reasoningContent.length}`);
             textResult = `[Reasoning thoughts]\n${reasoningContent}\n\n${textResult}`;
           }
-          
+
           assistantContent = textResult;
         } else {
           // Fallback to Gemini with system prompt if no key
@@ -3696,15 +3684,15 @@ app.post("/api/whatsapp/send", async (req, res) => {
   }
 
   const reqHost = req.get('host') || "";
-  const isSimulatedHost = 
-    host.includes("localhost") || 
-    host.includes("127.0.0.1") || 
-    (reqHost && host.includes(reqHost)) || 
+  const isSimulatedHost =
+    host.includes("localhost") ||
+    host.includes("127.0.0.1") ||
+    (reqHost && host.includes(reqHost)) ||
     host.includes("run.app");
 
   if (isSimulatedHost) {
     console.log(`[Virtual WAHA] Successfully simulated sending WhatsApp message to ${formattedChatId} on host ${host}: "${text}"`);
-    
+
     // Simulate real-time background webhook trigger if the message corresponds to a CRM lead to keep the hub responsive
     const db = readDB();
     const cleanPhone = formattedChatId.split("@")[0];
@@ -3726,8 +3714,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
       }
     }
 
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       result: {
         id: `msg-sim-${Date.now()}`,
         to: formattedChatId,
@@ -3764,8 +3752,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return res.status(response.status).json({ 
-        error: `WAHA returned HTTP ${response.status}: ${errorText || response.statusText}` 
+      return res.status(response.status).json({
+        error: `WAHA returned HTTP ${response.status}: ${errorText || response.statusText}`
       });
     }
 
@@ -3775,8 +3763,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
     console.error("WhatsApp Send Proxy failed:", err);
     // Fallback to Virtual Simulator if user's custom server is temporarily down, so the UI doesn't crash
     console.log(`[Virtual WAHA Fallback] Simulating dispatch because target ${host} was unreachable`);
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       simulatedFallback: true,
       result: {
         id: `msg-fallback-sim-${Date.now()}`,
@@ -3796,15 +3784,15 @@ app.post("/api/whatsapp/status", async (req, res) => {
   }
 
   const reqHost = req.get('host') || "";
-  const isSimulatedHost = 
-    host.includes("localhost") || 
-    host.includes("127.0.0.1") || 
-    (reqHost && host.includes(reqHost)) || 
+  const isSimulatedHost =
+    host.includes("localhost") ||
+    host.includes("127.0.0.1") ||
+    (reqHost && host.includes(reqHost)) ||
     host.includes("run.app");
 
   if (isSimulatedHost) {
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       sessions: [
         {
           name: "default",
@@ -3815,7 +3803,7 @@ app.post("/api/whatsapp/status", async (req, res) => {
             }
           }
         }
-      ] 
+      ]
     });
   }
 
@@ -3840,8 +3828,8 @@ app.post("/api/whatsapp/status", async (req, res) => {
   } catch (err: any) {
     console.error("WhatsApp Status Proxy failed:", err);
     // Return a virtual simulation working session as a friendly, robust fallback so they can interact with the applet cleanly
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       simulatedFallback: true,
       sessions: [
         {
@@ -4275,7 +4263,7 @@ app.post("/api/imagine/proxy", async (req, res) => {
             const rawData = parts[1];
             const buffer = Buffer.from(rawData, "base64");
             const extension = mimeType.split("/")[1] || "bin";
-            
+
             const blob = new Blob([buffer], { type: mimeType });
             formData.append(key, blob, `${key}_file.${extension}`);
           } else if (typeof val === "object" && val !== null) {
@@ -4295,7 +4283,7 @@ app.post("/api/imagine/proxy", async (req, res) => {
 
     console.log(`[Picsart Proxy] Forwarding ${method} to ${url}...`);
     const picsartRes = await fetch(url, fetchOptions);
-    
+
     const contentType = picsartRes.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
       const data = await picsartRes.json();
@@ -4811,16 +4799,16 @@ JSON Schema:
 // -------------------------------------------------------------
 app.post("/api/task-hub/generate", async (req, res) => {
   const { toolId, subToolId, inputs, attachedFile } = req.body;
-  
+
   if (!toolId || !subToolId) {
     return res.status(400).json({ error: "Missing required properties (toolId, subToolId)" });
   }
 
   try {
     console.log(`[Task Hub] Generating for tool: ${toolId}, subTool: ${subToolId}`);
-    
+
     let prompt = "";
-    
+
     switch (toolId) {
       case "resume_builder":
         if (subToolId === "resume_maker") {
@@ -5514,7 +5502,7 @@ app.get("/api/investment/alpha-vantage/search", async (req, res) => {
     const db = readDB();
     const apiKey = db.alphaVantageApiKey;
     if (!apiKey) return res.status(400).json({ error: "Alpha Vantage API Key is not configured." });
-    
+
     const data = await fetchAlphaVantage({ function: "SYMBOL_SEARCH", keywords: keywords as string }, apiKey);
     res.json(data);
   } catch (err: any) {
@@ -5563,10 +5551,10 @@ app.get("/api/investment/alpha-vantage/intraday", async (req, res) => {
     const apiKey = db.alphaVantageApiKey;
     if (!apiKey) return res.status(400).json({ error: "Alpha Vantage API Key is not configured." });
 
-    const data = await fetchAlphaVantage({ 
-      function: "TIME_SERIES_INTRADAY", 
-      symbol: symbol as string, 
-      interval: interval as string 
+    const data = await fetchAlphaVantage({
+      function: "TIME_SERIES_INTRADAY",
+      symbol: symbol as string,
+      interval: interval as string
     }, apiKey);
     res.json(data);
   } catch (err: any) {
@@ -5605,7 +5593,7 @@ app.post("/api/investment/analyze", async (req, res) => {
             symbol = bestMatch["1. symbol"];
           }
         }
-        
+
         const quoteRes = await fetchAlphaVantage({ function: "GLOBAL_QUOTE", symbol }, apiKey);
         const quote = quoteRes["Global Quote"];
         if (quote && Object.keys(quote).length > 0) {
@@ -5786,7 +5774,7 @@ app.get("/api/payment/config", (req, res) => {
 app.post("/api/payment/create-order", async (req, res) => {
   try {
     const { planId, topupPackId, billingCycle, isYearly, options } = req.body;
-    
+
     if (!planId && !topupPackId) {
       return res.status(400).json({ error: "Either Plan ID or Top-up Pack ID is required for order creation" });
     }
@@ -6079,10 +6067,10 @@ app.post("/api/payment/webhook", (req, res) => {
     // Record webhook event in DB for audit trail / anti-fraud telemetry
     const db = readDB();
     if (!db.webhook_events) db.webhook_events = [];
-    
+
     const eventId = payload.id || `wh-${Date.now()}`;
     const alreadyProcessed = db.webhook_events.some((e: any) => e.id === eventId);
-    
+
     if (alreadyProcessed) {
       return res.json({ status: "ok", message: "Event already processed" });
     }
@@ -6101,7 +6089,7 @@ app.post("/api/payment/webhook", (req, res) => {
     if (event === "payment.captured" || event === "order.paid") {
       const paymentObj = payload.payload?.payment?.entity || {};
       const orderNotes = paymentObj.notes || {};
-      
+
       const uId = orderNotes.userId || "user-1";
       const topupPackId = orderNotes.topupPackId;
       const planId = orderNotes.planId;
@@ -6111,7 +6099,7 @@ app.post("/api/payment/webhook", (req, res) => {
       if (topupPackId) {
         console.log(`[Webhook] Delivering topup pack ${topupPackId} for user ${uId} via webhook callback`);
         billingSystem.creditTopup(uId, topupPackId);
-        
+
         const freshDb = readDB();
         if (!freshDb.billingEvents) freshDb.billingEvents = [];
         freshDb.billingEvents.unshift({
@@ -6135,7 +6123,7 @@ app.post("/api/payment/webhook", (req, res) => {
         writeDB(freshDb);
       } else if (planId) {
         console.log(`[Webhook] Delivering subscription plan ${planId} for user ${uId} via webhook callback`);
-        
+
         const freshDb = readDB();
         freshDb.subscription = {
           planId,
@@ -6227,11 +6215,11 @@ app.post("/api/subscription/upgrade", (req, res) => {
     }
 
     const db = readDB();
-    
+
     // Simulate payment transaction
     const eventId = `evt-${Date.now()}`;
     const transactionId = `sub_mock_${Date.now().toString().slice(-6)}`;
-    
+
     db.subscription = {
       planId,
       status: "active",
@@ -6344,7 +6332,7 @@ app.post("/api/subscription/redeem", (req, res) => {
     // Activate the subscription plan for free
     const eventId = `evt-redeem-${Date.now()}`;
     const transactionId = `sub_redeem_${Date.now().toString().slice(-6)}`;
-    
+
     db.subscription = {
       planId: finalPlanId,
       status: "active",
@@ -6441,7 +6429,7 @@ app.post("/api/subscription/cancel", (req, res) => {
       db.subscription.status = "cancelled";
       db.subscription.cancelledAt = new Date().toISOString();
     }
-    
+
     if (!db.billingEvents) db.billingEvents = [];
     db.billingEvents.unshift({
       id: `evt-cancel-${Date.now()}`,
@@ -7078,7 +7066,7 @@ Ensure the returned response is absolute pure JSON matching this exact structure
     };
 
     db.savedCuriosityQueries.unshift(logEntry);
-    
+
     // Limit history to top 20 items to avoid bloated database
     if (db.savedCuriosityQueries.length > 20) {
       db.savedCuriosityQueries = db.savedCuriosityQueries.slice(0, 20);
@@ -7116,17 +7104,17 @@ Ensure the returned response is absolute pure JSON matching this exact structure
 app.post("/api/bionemo/screen", async (req, res) => {
   try {
     const { proteinId, proteinName, sequence, numMolecules, minAffinity } = req.body;
-    
+
     const targetProteinId = proteinId || "6LU7";
     const targetProteinName = proteinName || "SARS-CoV-2 Main Protease (Mpro)";
     const targetSeq = sequence || "SGFRKMAFPSGKVEGCMVQVTCGTTTLNGLWLDDVVYCPRHVICTSEDMLNPNYEDLLIRKSNHNFLVQAGNVQLRVIGHSMQNCVLKLKVDTANPKTPKYKFVRIQPGQTFSVLACYNGSPSGVCYVNDNFSLAAD";
     const reqMolecules = Number(numMolecules) || 8;
     const reqMinAffinity = Number(minAffinity) || -7.5;
 
-    const bionemoApiKey = process.env.NVIDIA_BIONEMO_API_KEY_CURRENT || 
-                         process.env.NVIDIA_BIONEMO_API_KEY || 
-                         process.env.NVIDIA_API_KEY_CURRENT ||
-                         "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";
+    const bionemoApiKey = process.env.NVIDIA_BIONEMO_API_KEY_CURRENT ||
+      process.env.NVIDIA_BIONEMO_API_KEY ||
+      process.env.NVIDIA_API_KEY_CURRENT ||
+      "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";
 
     console.log(`[BioNeMo Virtual Screening] Target Protein: ${targetProteinId} (${targetProteinName}). Number of candidates: ${reqMolecules}`);
 
@@ -7197,7 +7185,7 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
 
     // 1. Try real NVIDIA API first if key exists and isn't mock
     const isMockNvidiaKey = !bionemoApiKey || bionemoApiKey.includes("dTFt6bIRuEvQXN2J4g1QZpz") || bionemoApiKey === "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";
-    
+
     if (bionemoApiKey && !isMockNvidiaKey) {
       try {
         console.log("[BioNeMo API] Invoking real NVIDIA NIM API endpoint...");
@@ -7266,11 +7254,11 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
           name: targetProteinName,
           sequence: targetSeq,
           coordinates: [
-            {atom: "N", x: -5.2, y: 1.4, z: 0.8},
-            {atom: "CA", x: -4.1, y: 0.8, z: -0.2},
-            {atom: "C", x: -3.0, y: 1.7, z: -0.7},
-            {atom: "O", x: -3.2, y: 2.9, z: -0.9},
-            {atom: "N", x: -1.8, y: 1.1, z: -0.8}
+            { atom: "N", x: -5.2, y: 1.4, z: 0.8 },
+            { atom: "CA", x: -4.1, y: 0.8, z: -0.2 },
+            { atom: "C", x: -3.0, y: 1.7, z: -0.7 },
+            { atom: "O", x: -3.2, y: 2.9, z: -0.9 },
+            { atom: "N", x: -1.8, y: 1.1, z: -0.8 }
           ]
         },
         molecules: [
@@ -7285,7 +7273,7 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
             saScore: 2.3,
             hBonds: 4,
             mechanism: "Covalent protease inhibitor of active-site Cys-145",
-            atoms: [{element: "C", x: 0.2, y: 0.4, z: 0.1}, {element: "N", x: 1.1, y: -0.3, z: 0.8}]
+            atoms: [{ element: "C", x: 0.2, y: 0.4, z: 0.1 }, { element: "N", x: 1.1, y: -0.3, z: 0.8 }]
           },
           {
             id: "MOL-02",
@@ -7298,7 +7286,7 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
             saScore: 2.8,
             hBonds: 3,
             mechanism: "Non-covalent hydrogen bonding array inside catalytic cleft",
-            atoms: [{element: "C", x: -0.3, y: -0.5, z: 0.9}, {element: "O", x: 1.2, y: 0.1, z: -0.4}]
+            atoms: [{ element: "C", x: -0.3, y: -0.5, z: 0.9 }, { element: "O", x: 1.2, y: 0.1, z: -0.4 }]
           }
         ],
         blueprintLogs: [
@@ -7343,12 +7331,12 @@ app.post("/api/vista3d/segment", async (req, res) => {
     const { image, classes, apiKey } = req.body;
     const targetImage = image || "https://assets.ngc.nvidia.com/products/api-catalog/vista3d/example-1.nii.gz";
     const targetClasses = classes && Array.isArray(classes) && classes.length > 0 ? classes : ["liver", "spleen"];
-    
-    const activeApiKey = apiKey || 
-                         process.env.NVIDIA_API_KEY_CURRENT || 
-                         process.env.NVIDIA_API_KEY || 
-                         process.env.NVIDIA_BIONEMO_API_KEY_CURRENT || 
-                         "";
+
+    const activeApiKey = apiKey ||
+      process.env.NVIDIA_API_KEY_CURRENT ||
+      process.env.NVIDIA_API_KEY ||
+      process.env.NVIDIA_BIONEMO_API_KEY_CURRENT ||
+      "";
 
     console.log(`[VISTA-3D] Segmenting image: ${targetImage}. Target organs: ${targetClasses.join(", ")}`);
 
@@ -7541,19 +7529,19 @@ app.post("/api/open-app", (req, res) => {
 
 const getOmnigenAgentClient = (modelName: string) => {
   return {
-    client: new OpenAI({ 
-      apiKey: process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY, 
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/" 
+    client: new OpenAI({
+      apiKey: process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
     }),
     model: "gemini-2.5-flash"
   };
 };
 
-app.post("/api/ai/detect-intent", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/detect-intent", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const { prompt, fileInfo } = req.body;
     const { client, model } = getOmnigenAgentClient('llama-70b-fast');
-    
+
     const systemInstruction = `
       You are an intent detection engine for OmniGen AI.
       Analyze the user's prompt and file information to determine the required action and tool.
@@ -7562,7 +7550,7 @@ app.post("/api/ai/detect-intent", express.json({limit: '50mb'}), async (req, res
       Available tools: text-to-image, text-to-video, text-to-script, text-to-prompt, text-to-code, image-to-text, video-to-text, image-to-video, text-to-pdf, word-to-pdf, image-merger, bg-remover, text-to-song, watermark-remover, pdf-editor, whatsapp-agent, file-converter, ai-assistant.
     `;
     const input = `Prompt: "${prompt}"\nFile: ${fileInfo ? `${fileInfo.name} (${fileInfo.type})` : 'None'}`;
-    
+
     const response = await client.chat.completions.create({
       model,
       messages: [{ role: "system", content: systemInstruction }, { role: "user", content: input }] as any,
@@ -7575,7 +7563,7 @@ app.post("/api/ai/detect-intent", express.json({limit: '50mb'}), async (req, res
   }
 });
 
-app.post("/api/ai/generate-text", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/generate-text", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const { prompt, systemInstruction } = req.body;
     let { client, model } = getOmnigenAgentClient('gemini-2.5-flash');
@@ -7593,11 +7581,11 @@ app.post("/api/ai/generate-text", express.json({limit: '50mb'}), async (req, res
   }
 });
 
-app.post("/api/ai/analyze-media", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/analyze-media", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const { prompt, mimeType, base64Data } = req.body;
     const { client, model } = getOmnigenAgentClient('gpt-4o');
-    
+
     const response = await client.chat.completions.create({
       model,
       messages: [
@@ -7616,11 +7604,11 @@ app.post("/api/ai/analyze-media", express.json({limit: '50mb'}), async (req, res
   }
 });
 
-app.post("/api/ai/assistant", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/assistant", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const { prompt, systemInstruction, mediaData, mimeType } = req.body;
     const { client, model } = getOmnigenAgentClient('gpt-4o');
-    
+
     const messages: any[] = [{ role: "system", content: systemInstruction }];
     if (mediaData && mimeType) {
       messages.push({
@@ -7659,11 +7647,11 @@ app.post("/api/ai/assistant", express.json({limit: '50mb'}), async (req, res) =>
   }
 });
 
-app.post("/api/ai/assistant/tool-reply", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/assistant/tool-reply", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const { originalMessages, message, callId, toolResult } = req.body;
     const { client, model } = getOmnigenAgentClient('gpt-4o');
-    
+
     const response = await client.chat.completions.create({
       model,
       messages: [
@@ -7679,7 +7667,7 @@ app.post("/api/ai/assistant/tool-reply", express.json({limit: '50mb'}), async (r
   }
 });
 
-app.post("/api/ai/summarize-pdf", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/summarize-pdf", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
     if (!apiKey) return res.status(401).json({ error: "Gemini API Key is not configured." });
@@ -7696,7 +7684,7 @@ app.post("/api/ai/summarize-pdf", express.json({limit: '50mb'}), async (req, res
   }
 });
 
-app.post("/api/ai/translate-pdf", express.json({limit: '50mb'}), async (req, res) => {
+app.post("/api/ai/translate-pdf", express.json({ limit: '50mb' }), async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
     if (!apiKey) return res.status(401).json({ error: "Gemini API Key is not configured." });
@@ -7723,10 +7711,10 @@ app.post("/api/higgsfield/generate-image", async (req, res) => {
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
     }
-    
+
     const fullPrompt = `${style ? style + ' style, ' : ''}${prompt}`;
     const ai = new GoogleGenAI({ apiKey });
-    
+
     const response = await ai.models.generateContent({
       model: "imagen-3.0-generate-002",
       contents: fullPrompt,
@@ -7740,11 +7728,11 @@ app.post("/api/higgsfield/generate-image", async (req, res) => {
     if (base64Img) {
       imageUrl = `data:image/jpeg;base64,${base64Img}`;
     }
-    
+
     if (!imageUrl) {
       throw new Error("No image was generated by the model.");
     }
-    
+
     res.json({ success: true, url: imageUrl });
   } catch (error: any) {
     console.error("Higgsfield Image Error:", error);
@@ -7778,7 +7766,7 @@ app.post("/api/search/serp", async (req, res) => {
       try {
         console.log(`[Search] Executing SerpAPI query: "${query}" (Type: ${type || "google"})`);
         let url = `https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${apiKey}`;
-        
+
         // If youtube type is specified, use SerpAPI's YouTube engine
         if (type === "youtube") {
           url = `https://serpapi.com/search.json?engine=youtube&search_query=${encodeURIComponent(query)}&api_key=${apiKey}`;
@@ -7820,7 +7808,7 @@ app.post("/api/search/serp", async (req, res) => {
     // Fallback / Default: Use Gemini Google Search Grounding to get real live search results!
     console.log(`[Search] Executing Gemini Search Grounding for: "${query}" (Type: ${type || "google"})`);
     const client = getGeminiClient();
-    
+
     let contents = `Perform a Google Search to find top resources for: "${query}". Return a JSON array containing the top 5 most relevant results. Each object must have keys: "title", "url", and "snippet". Return ONLY the raw JSON array.`;
     if (type === "youtube") {
       contents = `Perform a Google/YouTube Search to find top video links for: "${query}". Return a JSON array containing the top 5 most relevant YouTube video results. Each object must have keys: "title", "url" (must be a valid youtube.com watch link), and "snippet". Return ONLY the raw JSON array.`;
@@ -7836,7 +7824,7 @@ app.post("/api/search/serp", async (req, res) => {
 
     const text = response.text || "";
     let results: any[] = [];
-    
+
     try {
       const cleanJson = text.replace(/```json/gi, "").replace(/```/g, "").trim();
       const match = cleanJson.match(/\[\s*\{.*\}\s*\]/s);
