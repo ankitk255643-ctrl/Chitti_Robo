@@ -768,95 +768,107 @@ const initialDB: LocalDB = {
   ]
 };
 
+// In-memory DB cache — persists changes within the server process lifetime.
+// On Vercel (read-only filesystem), file writes are silently ignored, but the
+// in-memory cache ensures changes (like redeem code activations) survive
+// within a warm serverless instance. On a persistent Node server, file writes
+// work as normal AND the cache provides fast reads.
+let _dbCache: LocalDB | null = null;
+
 function readDB(): LocalDB {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialDB, null, 2));
-    return initialDB;
-  }
+  // Return in-memory cache if available (fastest path)
+  if (_dbCache) return _dbCache;
+
   try {
-    const data = fs.readFileSync(DB_FILE, "utf-8");
-    const parsed = JSON.parse(data);
-    if (!parsed.conversionHistory) parsed.conversionHistory = [];
-    if (!parsed.savedFiles) parsed.savedFiles = [];
-    if (!parsed.investmentReports) parsed.investmentReports = [];
-    
-    // Inject Compatibility Properties for Billing & Subscription System
-    if (!parsed.profile) parsed.profile = { ...initialDB.profile };
-    if (!parsed.profile.role) parsed.profile.role = "owner_admin"; // owner_admin by default to ensure admin section is immediately visible/testable
-    
-    if (!parsed.subscription) {
-      parsed.subscription = { ...initialDB.subscription };
+    if (fs.existsSync(DB_FILE)) {
+      const data = fs.readFileSync(DB_FILE, "utf-8");
+      const parsed = JSON.parse(data) as LocalDB;
+      _dbCache = _hydrateDB(parsed);
+      return _dbCache;
     }
-    if (!parsed.usageTracking) {
-      parsed.usageTracking = { ...initialDB.usageTracking };
-    }
-    if (!parsed.billingEvents) {
-      parsed.billingEvents = [ ...initialDB.billingEvents ];
-    }
-    if (!parsed.organizationAccount) {
-      parsed.organizationAccount = null;
-    }
-    if (!parsed.teamMembers) {
-      parsed.teamMembers = [];
-    }
-    if (!parsed.apiCostLogs) {
-      parsed.apiCostLogs = [ ...initialDB.apiCostLogs ];
-    }
-    if (!parsed.redeemCodes) {
-      parsed.redeemCodes = [ ...initialDB.redeemCodes! ];
-    }
-
-    // Initialize new token billing collections
-    if (!parsed.token_wallets) parsed.token_wallets = [];
-    if (!parsed.token_ledger) parsed.token_ledger = [];
-    if (!parsed.usage_events) parsed.usage_events = [];
-    if (!parsed.razorpay_orders) parsed.razorpay_orders = [];
-    if (!parsed.webhook_events) parsed.webhook_events = [];
-    if (!parsed.jobs) parsed.jobs = [];
-
-    // Pre-seed active wallet for main user-1 profile
-    const wallet = parsed.token_wallets.find((w: any) => w.user_id === "user-1");
-    if (!wallet) {
-      const planId = parsed.subscription?.planId || "free_trial";
-      const plan = {
-        free_trial: 150,
-        starter: 1200,
-        pro: 2800,
-        ultra: 8000,
-        custom_individual: 15000,
-        school: 20000,
-        company: 50000,
-        enterprise: 500000
-      }[planId] || 150;
-
-      parsed.token_wallets.push({
-        id: `wallet-${Date.now()}`,
-        user_id: "user-1",
-        organization_id: parsed.organizationAccount?.id || null,
-        monthly_tokens_total: plan,
-        monthly_tokens_used: 0,
-        topup_tokens_total: 0,
-        topup_tokens_used: 0,
-        reserved_tokens: 0,
-        available_tokens: plan,
-        billing_cycle_start: new Date().toISOString(),
-        billing_cycle_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-        updated_at: new Date().toISOString()
-      });
-    }
-
-    return parsed;
   } catch (err) {
-    console.error("Error reading database file, returning initial schema:", err);
-    return initialDB;
+    console.error("Error reading database file, using initial schema:", err);
   }
+
+  // Fall back to fresh initialDB (deep clone so mutations don't corrupt the template)
+  _dbCache = _hydrateDB(JSON.parse(JSON.stringify(initialDB)));
+  // Best-effort write to disk (no-op on Vercel read-only FS)
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(_dbCache, null, 2)); } catch (_) {}
+  return _dbCache;
+}
+
+function _hydrateDB(parsed: any): LocalDB {
+  if (!parsed.conversionHistory) parsed.conversionHistory = [];
+  if (!parsed.savedFiles) parsed.savedFiles = [];
+  if (!parsed.investmentReports) parsed.investmentReports = [];
+
+  // Compatibility Properties for Billing & Subscription System
+  if (!parsed.profile) parsed.profile = { ...initialDB.profile };
+  if (!parsed.profile.role) parsed.profile.role = "owner_admin";
+
+  if (!parsed.subscription) parsed.subscription = { ...(initialDB.subscription as any) };
+  if (!parsed.usageTracking) parsed.usageTracking = { ...(initialDB.usageTracking as any) };
+  if (!parsed.billingEvents) parsed.billingEvents = [ ...initialDB.billingEvents! ];
+  if (!parsed.organizationAccount) parsed.organizationAccount = null;
+  if (!parsed.teamMembers) parsed.teamMembers = [];
+  if (!parsed.apiCostLogs) parsed.apiCostLogs = [ ...initialDB.apiCostLogs! ];
+
+  // Always ensure hardcoded redeem codes exist, merging any extras from file
+  const hardcoded: LocalDB["redeemCodes"] = JSON.parse(JSON.stringify(initialDB.redeemCodes!));
+  if (!parsed.redeemCodes) {
+    parsed.redeemCodes = hardcoded;
+  } else {
+    // Merge: keep file-persisted usesCount/usedBy but guarantee all hardcoded codes exist
+    for (const hc of hardcoded) {
+      const existing = parsed.redeemCodes.find((rc: any) => rc.code === hc.code);
+      if (!existing) parsed.redeemCodes.push(hc);
+    }
+  }
+
+  // Token billing collections
+  if (!parsed.token_wallets) parsed.token_wallets = [];
+  if (!parsed.token_ledger) parsed.token_ledger = [];
+  if (!parsed.usage_events) parsed.usage_events = [];
+  if (!parsed.razorpay_orders) parsed.razorpay_orders = [];
+  if (!parsed.webhook_events) parsed.webhook_events = [];
+  if (!parsed.jobs) parsed.jobs = [];
+
+  // Pre-seed wallet for main user
+  const wallet = parsed.token_wallets.find((w: any) => w.user_id === "user-1");
+  if (!wallet) {
+    const planId = parsed.subscription?.planId || "free_trial";
+    const tokenMap: Record<string, number> = {
+      free_trial: 150, starter: 1200, pro: 2800, ultra: 8000,
+      custom_individual: 15000, school: 20000, company: 50000, enterprise: 500000
+    };
+    const plan = tokenMap[planId] ?? 150;
+    parsed.token_wallets.push({
+      id: `wallet-${Date.now()}`,
+      user_id: "user-1",
+      organization_id: parsed.organizationAccount?.id || null,
+      monthly_tokens_total: plan,
+      monthly_tokens_used: 0,
+      topup_tokens_total: 0,
+      topup_tokens_used: 0,
+      reserved_tokens: 0,
+      available_tokens: plan,
+      billing_cycle_start: new Date().toISOString(),
+      billing_cycle_end: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  return parsed as LocalDB;
 }
 
 function writeDB(db: LocalDB) {
+  // Always update in-memory cache first — this is the primary store on Vercel
+  _dbCache = db;
+  // Best-effort disk write (works on persistent servers, silently no-ops on Vercel read-only FS)
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
   } catch (err) {
-    console.error("Error writing to database:", err);
+    console.warn("writeDB: Could not write to disk (read-only FS?). Changes are held in memory.", err);
   }
 }
 
