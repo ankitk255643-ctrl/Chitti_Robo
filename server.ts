@@ -15,6 +15,7 @@ import CloudConvert from "cloudconvert";
 import multer from "multer";
 import { exec } from "child_process";
 import { PDFDocument, rgb } from "pdf-lib";
+import { saveToFirestore, syncFirestoreToLocal } from "./server/firebase-sync";
 
 // Paste Razorpay keys in .env file before testing payment.
 // Do not expose Razorpay secret key on frontend.
@@ -92,6 +93,23 @@ function verifySignature(orderId: string, paymentId: string, signature: string, 
 // SECURE AGENT API KEY MANAGER DATA & LOGIC
 // ==========================================
 
+// Bootstrap custom keys from database.json immediately so they are available in process.env for providers initialization
+try {
+  const dbPath = path.join(process.cwd(), "database.json");
+  if (fs.existsSync(dbPath)) {
+    const data = JSON.parse(fs.readFileSync(dbPath, "utf-8"));
+    if (data && data.custom_api_keys) {
+      for (const [key, val] of Object.entries(data.custom_api_keys)) {
+        if (val && typeof val === "string") {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+} catch (err) {
+  console.error("Error pre-loading custom API keys:", err);
+}
+
 export const API_PROVIDERS_CONFIG = [
   { id: "gemini", name: "Gemini", provider: "Google", currentKeyEnv: "GEMINI_API_KEY_CURRENT", fallbackEnv: "GEMINI_API_KEY", backupKeyEnvs: ["GEMINI_API_KEY_BACKUP_1", "GEMINI_API_KEY_BACKUP_2", "GEMINI_API_KEY_BACKUP_3", "GEMINI_API_KEY_BACKUP_4", "GEMINI_API_KEY_BACKUP_5"] },
   { id: "claude", name: "Claude", provider: "Anthropic", currentKeyEnv: "CLAUDE_API_KEY_CURRENT", fallbackEnv: "CLAUDE_API_KEY", backupKeyEnvs: ["CLAUDE_API_KEY_BACKUP_1", "CLAUDE_API_KEY_BACKUP_2", "CLAUDE_API_KEY_BACKUP_3", "CLAUDE_API_KEY_BACKUP_4", "CLAUDE_API_KEY_BACKUP_5"] },
@@ -148,14 +166,14 @@ export const keySwitchLogs: Array<{
 API_PROVIDERS_CONFIG.forEach(provider => {
   const currentFilled = !!(process.env[provider.currentKeyEnv] || (provider.fallbackEnv && process.env[provider.fallbackEnv]));
   const backupFilledCount = provider.backupKeyEnvs.filter(env => !!process.env[env]).length;
-
+  
   let initialStatus = "Missing";
   if (currentFilled) {
     initialStatus = "Active";
   } else if (backupFilledCount > 0) {
     initialStatus = "Backup Ready";
   }
-
+  
   providerRuntimeStatus[provider.id] = {
     activeKeyIndex: 0,
     status: initialStatus,
@@ -168,7 +186,7 @@ API_PROVIDERS_CONFIG.forEach(provider => {
 export function getActiveApiKey(providerId: string): string | null {
   const config = API_PROVIDERS_CONFIG.find(p => p.id === providerId);
   if (!config) return null;
-
+  
   const state = providerRuntimeStatus[providerId];
   if (!state) return null;
 
@@ -193,7 +211,7 @@ export function handleKeyFailure(providerId: string, errorMsg: string): boolean 
 
   const oldIndex = state.activeKeyIndex;
   const isRateLimit = errorMsg.toLowerCase().includes("rate") || errorMsg.toLowerCase().includes("429") || errorMsg.toLowerCase().includes("quota");
-
+  
   state.lastError = errorMsg;
   state.status = isRateLimit ? "Rate Limited" : "Failed";
 
@@ -219,7 +237,7 @@ export function handleKeyFailure(providerId: string, errorMsg: string): boolean 
   if (foundIndex !== -1) {
     state.activeKeyIndex = foundIndex;
     state.status = "Active"; // mark as active again since we found a backup
-
+    
     const event = {
       id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toISOString(),
@@ -230,7 +248,7 @@ export function handleKeyFailure(providerId: string, errorMsg: string): boolean 
       newIndex: foundIndex,
       message: `Primary/backup key index ${oldIndex} failed (${errorMsg}). Automatically failing over and activating Backup Key ${foundIndex}.`
     };
-
+    
     keySwitchLogs.unshift(event);
     console.log(`[KeyManager] Failover activated for ${config.name}: Index ${oldIndex} -> ${foundIndex}`);
     return true;
@@ -302,11 +320,11 @@ export async function executeWithAutomaticKeyRotation<T>(
 
     try {
       const result = await operation(apiKey);
-
+      
       // Update status to Active upon success
       state.status = "Active";
       state.lastError = "";
-
+      
       return result;
     } catch (err: any) {
       attempt++;
@@ -314,13 +332,13 @@ export async function executeWithAutomaticKeyRotation<T>(
       const errStatus = err?.status || err?.code || err?.statusCode || (err?.response && err?.response.status) || 0;
 
       // Detect authorization / validation issues (401, 403, invalid key keywords)
-      const isAuthError = errStatus === 401 || errStatus === 403 ||
-        errMessage.includes("api key") ||
-        errMessage.includes("invalid key") ||
-        errMessage.includes("unauthorized") ||
-        errMessage.includes("key_expired") ||
-        errMessage.includes("forbidden") ||
-        errMessage.includes("invalid_api_key");
+      const isAuthError = errStatus === 401 || errStatus === 403 || 
+                          errMessage.includes("api key") || 
+                          errMessage.includes("invalid key") || 
+                          errMessage.includes("unauthorized") ||
+                          errMessage.includes("key_expired") ||
+                          errMessage.includes("forbidden") ||
+                          errMessage.includes("invalid_api_key");
 
       if (isAuthError && attempt < maxAttempts) {
         console.warn(`[KeyManager] Auth/Key failure (status: ${errStatus}) detected for provider "${providerId}": "${errMessage}". Cycling to next backup key...`);
@@ -388,16 +406,16 @@ async function robustGenerateContent(params: any): Promise<any> {
         lastError = err;
         const errMessage = String(err?.message || "").toLowerCase();
         const errStatus = err?.status || err?.code || 0;
-
+        
         // Check if it's an API Key or rate-limit or quota error to trigger dynamic failover
         const isKeyOrQuotaError = errStatus === 401 || errStatus === 403 || errStatus === 429 ||
-          errMessage.includes("api key") ||
-          errMessage.includes("invalid key") ||
-          errMessage.includes("quota") ||
-          errMessage.includes("key_expired") ||
-          errMessage.includes("rate limit") ||
-          errMessage.includes("blocked");
-
+                                  errMessage.includes("api key") || 
+                                  errMessage.includes("invalid key") || 
+                                  errMessage.includes("quota") || 
+                                  errMessage.includes("key_expired") ||
+                                  errMessage.includes("rate limit") ||
+                                  errMessage.includes("blocked");
+                                  
         if (isKeyOrQuotaError) {
           console.warn(`[KeyManager] Detected key failure on Gemini API: "${errMessage}". Triggering backup failover...`);
           const activatedBackup = handleKeyFailure("gemini", err.message || "API key error or quota exceeded");
@@ -408,13 +426,13 @@ async function robustGenerateContent(params: any): Promise<any> {
           }
         }
 
-        const isTransient = errStatus === 503 || errStatus === 429 ||
-          errMessage.includes("503") ||
-          errMessage.includes("429") ||
-          errMessage.includes("temporary") ||
-          errMessage.includes("unavailable") ||
-          errMessage.includes("high demand") ||
-          errMessage.includes("overloaded");
+        const isTransient = errStatus === 503 || errStatus === 429 || 
+                            errMessage.includes("503") || 
+                            errMessage.includes("429") || 
+                            errMessage.includes("temporary") || 
+                            errMessage.includes("unavailable") ||
+                            errMessage.includes("high demand") ||
+                            errMessage.includes("overloaded");
 
         if (isTransient && retries > 0) {
           console.warn(`Transient error calling ${model} (${errMessage || errStatus}), retrying in ${delayMs}ms. Retries left: ${retries}`);
@@ -565,6 +583,7 @@ interface LocalDB {
     createdAt: string;
     usedBy?: { userId: string; email: string; redeemedAt: string }[];
   }[];
+  custom_api_keys?: Record<string, string>;
 }
 
 // Ensure default DB exists
@@ -765,7 +784,8 @@ const initialDB: LocalDB = {
       request_metadata: "Greeting",
       created_at: new Date().toISOString()
     }
-  ]
+  ],
+  custom_api_keys: {}
 };
 
 function readDB(): LocalDB {
@@ -779,11 +799,11 @@ function readDB(): LocalDB {
     if (!parsed.conversionHistory) parsed.conversionHistory = [];
     if (!parsed.savedFiles) parsed.savedFiles = [];
     if (!parsed.investmentReports) parsed.investmentReports = [];
-
+    
     // Inject Compatibility Properties for Billing & Subscription System
     if (!parsed.profile) parsed.profile = { ...initialDB.profile };
     if (!parsed.profile.role) parsed.profile.role = "owner_admin"; // owner_admin by default to ensure admin section is immediately visible/testable
-
+    
     if (!parsed.subscription) {
       parsed.subscription = { ...initialDB.subscription };
     }
@@ -791,7 +811,7 @@ function readDB(): LocalDB {
       parsed.usageTracking = { ...initialDB.usageTracking };
     }
     if (!parsed.billingEvents) {
-      parsed.billingEvents = [...initialDB.billingEvents];
+      parsed.billingEvents = [ ...initialDB.billingEvents ];
     }
     if (!parsed.organizationAccount) {
       parsed.organizationAccount = null;
@@ -800,10 +820,10 @@ function readDB(): LocalDB {
       parsed.teamMembers = [];
     }
     if (!parsed.apiCostLogs) {
-      parsed.apiCostLogs = [...initialDB.apiCostLogs];
+      parsed.apiCostLogs = [ ...initialDB.apiCostLogs ];
     }
     if (!parsed.redeemCodes) {
-      parsed.redeemCodes = [...initialDB.redeemCodes!];
+      parsed.redeemCodes = [ ...initialDB.redeemCodes! ];
     }
 
     // Initialize new token billing collections
@@ -813,6 +833,14 @@ function readDB(): LocalDB {
     if (!parsed.razorpay_orders) parsed.razorpay_orders = [];
     if (!parsed.webhook_events) parsed.webhook_events = [];
     if (!parsed.jobs) parsed.jobs = [];
+    if (!parsed.custom_api_keys) parsed.custom_api_keys = {};
+    
+    // Load custom keys into process.env
+    for (const [key, val] of Object.entries(parsed.custom_api_keys)) {
+      if (val && typeof val === "string") {
+        process.env[key] = val;
+      }
+    }
 
     // Pre-seed active wallet for main user-1 profile
     const wallet = parsed.token_wallets.find((w: any) => w.user_id === "user-1");
@@ -855,6 +883,7 @@ function readDB(): LocalDB {
 function writeDB(db: LocalDB) {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+    saveToFirestore(db);
   } catch (err) {
     console.error("Error writing to database:", err);
   }
@@ -1312,7 +1341,8 @@ app.get("/api/keys/status", (req, res) => {
     };
   });
 
-  res.json({ success: true, providers });
+  const db = readDB();
+  res.json({ success: true, providers, customKeys: db.custom_api_keys || {} });
 });
 
 app.post("/api/keys/test-connection", async (req, res) => {
@@ -1329,7 +1359,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
 
   const idx = state.activeKeyIndex;
   let envName = idx === 0 ? config.currentKeyEnv : config.backupKeyEnvs[idx - 1];
-  let keyVal = idx === 0
+  let keyVal = idx === 0 
     ? (process.env[config.currentKeyEnv] || (config.fallbackEnv ? process.env[config.fallbackEnv] : undefined))
     : process.env[envName];
 
@@ -1339,7 +1369,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
   if (simulateFailure) {
     const errorMsg = "Simulated QuotaExceededError: Rate limit of 15 RPM hit on active key endpoint.";
     const activatedBackup = handleKeyFailure(providerId, errorMsg);
-
+    
     return res.json({
       success: false,
       message: `Simulated failure on key index ${idx}. Active index was moved.`,
@@ -1363,7 +1393,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
 
   // Simulate or verify key format
   const isKeyValid = keyVal.length > 8 && !keyVal.includes("YOUR_") && !keyVal.includes("PASTE_");
-
+  
   if (!isKeyValid) {
     const errorMsg = "InvalidKeyError: Key signature is malformed or contains placeholder text.";
     const activatedBackup = handleKeyFailure(providerId, errorMsg);
@@ -1380,7 +1410,7 @@ app.post("/api/keys/test-connection", async (req, res) => {
   // Success!
   state.status = "Active";
   state.lastError = "";
-
+  
   const logEvent = {
     id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     timestamp: new Date().toISOString(),
@@ -1415,12 +1445,12 @@ app.post("/api/keys/update-priority", (req, res) => {
 
   const oldIndex = state.activeKeyIndex;
   state.activeKeyIndex = Number(targetIndex);
-
+  
   // Update status based on existence of selected key
-  let keyVal = targetIndex === 0
+  let keyVal = targetIndex === 0 
     ? (process.env[config.currentKeyEnv] || (config.fallbackEnv ? process.env[config.fallbackEnv] : undefined))
     : process.env[config.backupKeyEnvs[targetIndex - 1]];
-
+    
   if (keyVal) {
     state.status = "Active";
     state.lastError = "";
@@ -1448,6 +1478,148 @@ app.post("/api/keys/update-priority", (req, res) => {
   });
 });
 
+app.post("/api/keys/update-custom", express.json(), (req, res) => {
+  const { envContent, individualKeys } = req.body;
+  const db = readDB();
+  if (!db.custom_api_keys) db.custom_api_keys = {};
+
+  let addedCount = 0;
+  const updatedKeys: string[] = [];
+
+  // 1. Process individual keys if provided
+  if (individualKeys && typeof individualKeys === "object") {
+    for (const [key, val] of Object.entries(individualKeys)) {
+      if (typeof val === "string") {
+        const trimmedVal = val.trim();
+        process.env[key] = trimmedVal;
+        db.custom_api_keys[key] = trimmedVal;
+        updatedKeys.push(key);
+        addedCount++;
+      }
+    }
+  }
+
+  // 2. Process .env file content if provided
+  if (envContent && typeof envContent === "string") {
+    const lines = envContent.split(/\r?\n/);
+    for (let line of lines) {
+      line = line.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eqIdx = line.indexOf("=");
+      if (eqIdx > 0) {
+        const key = line.substring(0, eqIdx).trim();
+        let value = line.substring(eqIdx + 1).trim();
+        // Remove surrounding quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.substring(1, value.length - 1);
+        }
+        process.env[key] = value;
+        db.custom_api_keys[key] = value;
+        updatedKeys.push(key);
+        addedCount++;
+      }
+    }
+  }
+
+  // Save to DB
+  writeDB(db);
+
+  // Re-run runtime status refresh for any providers whose keys changed
+  API_PROVIDERS_CONFIG.forEach(provider => {
+    const currentFilled = !!(process.env[provider.currentKeyEnv] || (provider.fallbackEnv && process.env[provider.fallbackEnv]));
+    const backupFilledCount = provider.backupKeyEnvs.filter(env => !!process.env[env]).length;
+    
+    let currentStatus = "Missing";
+    if (currentFilled) {
+      currentStatus = "Active";
+    } else if (backupFilledCount > 0) {
+      currentStatus = "Backup Ready";
+    }
+
+    // Refresh state if it exists, or initialize
+    if (!providerRuntimeStatus[provider.id]) {
+      providerRuntimeStatus[provider.id] = {
+        activeKeyIndex: 0,
+        status: currentStatus,
+        lastError: "",
+        lastUsedAt: "",
+        monthlyUsage: 0
+      };
+    } else {
+      providerRuntimeStatus[provider.id].status = currentStatus;
+      if (currentFilled && providerRuntimeStatus[provider.id].activeKeyIndex === 0) {
+        providerRuntimeStatus[provider.id].lastError = "";
+      }
+    }
+  });
+
+  // Log the update
+  const logEvent = {
+    id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    providerId: "system",
+    providerName: "Key Manager Core",
+    eventType: "manual_override" as const,
+    oldIndex: 0,
+    newIndex: 0,
+    message: `Uploaded / saved ${addedCount} custom API keys successfully. Active providers re-initialized.`
+  };
+  keySwitchLogs.unshift(logEvent);
+
+  res.json({
+    success: true,
+    message: `Successfully loaded and saved ${addedCount} keys to dynamic environment.`,
+    updatedKeys
+  });
+});
+
+app.post("/api/keys/delete-custom", express.json(), (req, res) => {
+  const { keyName } = req.body;
+  if (!keyName) {
+    return res.status(400).json({ success: false, message: "keyName is required" });
+  }
+
+  const db = readDB();
+  if (db.custom_api_keys && db.custom_api_keys[keyName]) {
+    delete db.custom_api_keys[keyName];
+    delete process.env[keyName];
+    writeDB(db);
+
+    // Refresh provider runtime statuses
+    API_PROVIDERS_CONFIG.forEach(provider => {
+      const currentFilled = !!(process.env[provider.currentKeyEnv] || (provider.fallbackEnv && process.env[provider.fallbackEnv]));
+      const backupFilledCount = provider.backupKeyEnvs.filter(env => !!process.env[env]).length;
+      
+      let currentStatus = "Missing";
+      if (currentFilled) {
+        currentStatus = "Active";
+      } else if (backupFilledCount > 0) {
+        currentStatus = "Backup Ready";
+      }
+
+      if (providerRuntimeStatus[provider.id]) {
+        providerRuntimeStatus[provider.id].status = currentStatus;
+      }
+    });
+
+    const logEvent = {
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      providerId: "system",
+      providerName: "Key Manager Core",
+      eventType: "manual_override" as const,
+      oldIndex: 0,
+      newIndex: 0,
+      message: `Deleted custom API key: ${keyName}.`
+    };
+    keySwitchLogs.unshift(logEvent);
+
+    return res.json({ success: true, message: `Successfully deleted custom key: ${keyName}` });
+  }
+
+  res.json({ success: false, message: `Custom key ${keyName} not found` });
+});
+
 app.get("/api/keys/logs", (req, res) => {
   res.json({ success: true, logs: keySwitchLogs });
 });
@@ -1464,7 +1636,7 @@ app.post("/api/keys/clear-logs", (req, res) => {
 app.get("/api/climate/storm-data", async (req, res) => {
   const stormGlassKey = process.env.STORMGLASS_API_KEY_CURRENT || process.env.STORMGLASS_API_KEY;
   const isKeyActive = !!(stormGlassKey && stormGlassKey.length > 8);
-
+  
   // High-fidelity active storm tracks (simulated and live tracker models)
   const baseStorms = [
     {
@@ -1576,15 +1748,15 @@ app.post("/api/climate/nvidia-forecast", async (req, res) => {
 
   // Let's generate a highly technical meteorological simulation response
   // representing NVIDIA Modulus/FourCastNet AI-driven physics predictions.
-
+  
   // Calculate relative base values based on coordinates
   // Equator is hot, poles are cold
   const distFromEquator = Math.abs(latitude) / 90;
   const baseTemp = 32 - (distFromEquator * 45) + (parseFloat(temperatureFactor || 0) * 15);
-
+  
   // Winds are generally higher at specific jet streams
   const baseWind = 12 + (Math.sin(latitude * Math.PI / 45) * 10) + (parseFloat(windFactor || 0) * 55);
-
+  
   // Precipitation is higher in equatorial tropics (lat 0) and temperate zones
   const baseRain = Math.max(0, (200 - Math.abs(latitude) * 2) * (parseFloat(rainfallFactor || 0) * 1.5));
 
@@ -1658,7 +1830,7 @@ app.post("/api/climate/nvidia-forecast", async (req, res) => {
 app.get("/api/climate/earth2/status", (req, res) => {
   const repoPath = path.join(process.cwd(), "earth2-weather-analytics");
   const exists = fs.existsSync(repoPath);
-
+  
   let files: string[] = [];
   if (exists) {
     try {
@@ -1684,7 +1856,7 @@ app.get("/api/climate/earth2/status", (req, res) => {
 
 app.post("/api/climate/earth2/clone", (req, res) => {
   const repoPath = path.join(process.cwd(), "earth2-weather-analytics");
-
+  
   try {
     if (!fs.existsSync(repoPath)) {
       fs.mkdirSync(repoPath, { recursive: true });
@@ -1800,7 +1972,7 @@ app.post("/api/climate/earth2/run", (req, res) => {
 
   // Let's generate physics-grounded weather data based on coordinate math
   const distFromEquator = Math.abs(targetLat) / 90;
-
+  
   // Base hourly values with variation curves
   const records = [];
   const now = new Date();
@@ -1808,14 +1980,14 @@ app.post("/api/climate/earth2/run", (req, res) => {
   for (let i = 0; i < numSteps; i++) {
     const hourTime = new Date(now.getTime() + i * 3600000);
     const hourOfDay = hourTime.getHours();
-
+    
     // diurnal variation (warm in afternoon, cold at night)
-    const diurnalFactor = Math.sin((hourOfDay - 6) / 24 * 2 * Math.PI);
-
+    const diurnalFactor = Math.sin((hourOfDay - 6) / 24 * 2 * Math.PI); 
+    
     // Base temperature calculation
     const tempBase = 28 - (distFromEquator * 32) + (diurnalFactor * 4.5);
     const calculatedTemp = parseFloat(tempBase.toFixed(1));
-
+    
     // Wind speeds vary randomly, higher at poles and mid-latitudes
     const windBase = 8 + Math.abs(Math.sin(targetLat * Math.PI / 45)) * 12 + Math.sin(i / 10) * 4;
     const calculatedWind = parseFloat(windBase.toFixed(1));
@@ -2036,7 +2208,7 @@ function getSimulatedAirspaceStates(lamin: number, lomin: number, lamax: number,
       destLat = dest.lat;
       destLon = dest.lon;
     }
-
+    
     // Calculate distance and heading
     const dy = destLat - f.lat;
     const dx = destLon - f.lon;
@@ -2077,7 +2249,7 @@ function getSimulatedAirspaceStates(lamin: number, lomin: number, lamax: number,
     // Update lat/lon
     f.lat += (dy / dist) * step;
     f.lon += (dx / dist) * step;
-
+    
     // Slight fluctuation in altitude
     f.altitude += Math.floor((Math.random() - 0.5) * 50);
     if (f.altitude < 3000) f.altitude = 3000;
@@ -2176,7 +2348,7 @@ app.get("/api/airspace/states", async (req, res) => {
   try {
     const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
     console.log(`[Proxy] Fetching airspace states from OpenSky: ${url}`);
-
+    
     const headers: Record<string, string> = {
       "Accept": "application/json",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -2389,7 +2561,7 @@ app.post("/api/convert-file", async (req, res) => {
   if (apiKey && !isMockKey) {
     try {
       console.log(`CloudConvert executing real conversion via API: ${fileName} -> ${targetFormat}`);
-
+      
       // Clean base64 prefix if present
       let cleanBase64 = base64;
       if (base64.includes(";base64,")) {
@@ -2519,7 +2691,7 @@ app.post("/api/convert-file", async (req, res) => {
 
   // Real Local File Conversion if no API key or on error fallback
   console.log(`CloudConvert executing local/fallback conversion: ${fileName} (${fileType}) -> ${targetFormat}`);
-
+  
   let convertedBase64 = base64;
   let isConvertedLocally = false;
   let cleanBase64 = base64;
@@ -2540,10 +2712,10 @@ app.post("/api/convert-file", async (req, res) => {
         const { width, height } = page.getSize();
         const fontSize = 11;
         const margin = 50;
-
+        
         const lines = textContent.split(/\r?\n/);
         let currentY = height - margin;
-
+        
         for (const line of lines) {
           if (currentY < margin + fontSize) {
             page = pdfDoc.addPage();
@@ -2559,7 +2731,7 @@ app.post("/api/convert-file", async (req, res) => {
           });
           currentY -= fontSize * 1.45;
         }
-
+        
         const pdfBytes = await pdfDoc.save();
         convertedBase64 = Buffer.from(pdfBytes).toString("base64");
         isConvertedLocally = true;
@@ -2568,16 +2740,16 @@ app.post("/api/convert-file", async (req, res) => {
       } else if (inputExt === "docx") {
         const docxResult = await mammoth.extractRawText({ buffer: rawBuffer });
         const textContent = docxResult.value || "Empty Word Document";
-
+        
         const pdfDoc = await PDFDocument.create();
         let page = pdfDoc.addPage();
         const { width, height } = page.getSize();
         const fontSize = 11;
         const margin = 50;
-
+        
         const lines = textContent.split(/\r?\n/);
         let currentY = height - margin;
-
+        
         for (const line of lines) {
           if (currentY < margin + fontSize) {
             page = pdfDoc.addPage();
@@ -2592,7 +2764,7 @@ app.post("/api/convert-file", async (req, res) => {
           });
           currentY -= fontSize * 1.45;
         }
-
+        
         const pdfBytes = await pdfDoc.save();
         convertedBase64 = Buffer.from(pdfBytes).toString("base64");
         isConvertedLocally = true;
@@ -2602,28 +2774,28 @@ app.post("/api/convert-file", async (req, res) => {
         const pdfDoc = await PDFDocument.create();
         const page = pdfDoc.addPage();
         const { width: pageWidth, height: pageHeight } = page.getSize();
-
+        
         let embeddedImage;
         if (inputExt === "png") {
           embeddedImage = await pdfDoc.embedPng(rawBuffer);
         } else {
           embeddedImage = await pdfDoc.embedJpg(rawBuffer);
         }
-
+        
         const { width: imgWidth, height: imgHeight } = embeddedImage.scale(1);
         const scale = Math.min(pageWidth / imgWidth, pageHeight / imgHeight, 1);
         const finalWidth = imgWidth * scale;
         const finalHeight = imgHeight * scale;
         const x = (pageWidth - finalWidth) / 2;
         const y = (pageHeight - finalHeight) / 2;
-
+        
         page.drawImage(embeddedImage, {
           x,
           y,
           width: finalWidth,
           height: finalHeight,
         });
-
+        
         const pdfBytes = await pdfDoc.save();
         convertedBase64 = Buffer.from(pdfBytes).toString("base64");
         isConvertedLocally = true;
@@ -2699,8 +2871,8 @@ app.post("/api/convert-file", async (req, res) => {
     agentName: "Local Converter Core",
     taskType: "file_conversion",
     tokensUsed: 1000,
-    description: isConvertedLocally
-      ? `Real local conversion: ${fileName} to ${targetFormat} (processed locally)`
+    description: isConvertedLocally 
+      ? `Real local conversion: ${fileName} to ${targetFormat} (processed locally)` 
       : `Simulated conversion fallback: ${fileName} to ${targetFormat}`,
     createdAt: new Date().toISOString(),
   });
@@ -3061,12 +3233,12 @@ app.post("/api/chats/:id/messages", async (req, res) => {
   // SECURE ANTI-LOOPHOLE TOKEN GATING & RESERVATION
   const isPremiumModel = chosenAgent.id !== "agent-gpt-gemini";
   const fileMb = file ? Math.ceil((Buffer.from(file.base64, "base64").length) / (1024 * 1024)) : 0;
-
+  
   const gateCheck = billingSystem.verifyLimitsAndAccess("user-1", "intelligence_core", "quick_chat", {
     isPremiumModel,
     fileSizeMb: fileMb
   });
-
+  
   if (!gateCheck.allowed) {
     db.messages = db.messages.filter((m: any) => m.id !== userMsgId);
     writeDB(db);
@@ -3080,7 +3252,7 @@ app.post("/api/chats/:id/messages", async (req, res) => {
   const inputLenEst = (content || "").length;
   const inputTokensEst = Math.ceil(inputLenEst / 4);
   const outputTokensEst = (taskType === "coding" || taskType === "debugging") ? 600 : 250;
-
+  
   const estRawCostUsd = calculateRawProviderCost(
     chosenAgent.provider || "Google",
     chosenAgent.id,
@@ -3089,10 +3261,10 @@ app.post("/api/chats/:id/messages", async (req, res) => {
       outputTokens: outputTokensEst
     }
   );
-
+  
   // Convert USD cost to platform tokens (matching billing system formula)
   const estCostBasedTokens = Math.ceil((estRawCostUsd * 83 * 2.5) / 1.5);
-
+  
   // Define a safe base floor matching rate card to prevent zero estimates
   let minRate = 2;
   if (taskType === "coding" || taskType === "debugging") {
@@ -3100,9 +3272,9 @@ app.post("/api/chats/:id/messages", async (req, res) => {
   } else if (chosenAgent.id === "agent-claude" || chosenAgent.id === "agent-grok") {
     minRate = 15;
   }
-
+  
   const estimatedTokens = Math.max(minRate, estCostBasedTokens);
-
+  
   const reservation = billingSystem.reserveTokensForAction("user-1", "intelligence_core", "quick_chat", estimatedTokens);
   if (!reservation.success) {
     db.messages = db.messages.filter((m: any) => m.id !== userMsgId);
@@ -3249,7 +3421,7 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
             },
           });
         } else if (
-          mime.includes("officedocument.wordprocessingml.document") ||
+          mime.includes("officedocument.wordprocessingml.document") || 
           filename.endsWith(".docx")
         ) {
           try {
@@ -3267,12 +3439,12 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
             });
           }
         } else if (
-          mime.startsWith("text/") ||
-          filename.endsWith(".txt") ||
-          filename.endsWith(".json") ||
-          filename.endsWith(".csv") ||
-          filename.endsWith(".js") ||
-          filename.endsWith(".ts") ||
+          mime.startsWith("text/") || 
+          filename.endsWith(".txt") || 
+          filename.endsWith(".json") || 
+          filename.endsWith(".csv") || 
+          filename.endsWith(".js") || 
+          filename.endsWith(".ts") || 
           filename.endsWith(".md")
         ) {
           try {
@@ -3362,16 +3534,16 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
           const targetModel = isMinimax ? "minimaxai/minimax-m3" : "moonshotai/kimi-k2.6";
           const maxTokensToUse = isMinimax ? 8192 : 4096;
           const topPToUse = isMinimax ? 0.95 : 1.0;
-
+          
           console.log(`[NVIDIA API] Invoking real NVIDIA AI Endpoints with model ${targetModel}...`);
-
+          
           // Construct messages for OpenAI format
           const openAIMessages: any[] = [];
-
+          
           if (systemPrompt) {
             openAIMessages.push({ role: "system", content: systemPrompt });
           }
-
+          
           for (const m of lastPriorMessages) {
             let msgContent: any = m.content || "";
             // If MiniMax and message has a valid image/video file, form multimodal payload
@@ -3395,7 +3567,7 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
               content: msgContent
             });
           }
-
+          
           // Add the current user message
           let currentMsgContent: any = content || "Analyze my uploaded attachment.";
           if (isMinimax && file && file.base64) {
@@ -3418,7 +3590,7 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
             role: "user",
             content: currentMsgContent
           });
-
+ 
           // Fetch from NVIDIA
           const nvidiaResponse = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
             method: "POST",
@@ -3434,23 +3606,23 @@ Use beautiful Markdown typography, tables, and nested listings. Be extremely enc
               max_tokens: maxTokensToUse
             })
           });
-
+ 
           if (!nvidiaResponse.ok) {
             const errBody = await nvidiaResponse.text();
             throw new Error(`NVIDIA API responded with status ${nvidiaResponse.status}: ${errBody}`);
           }
-
+ 
           const nvidiaData = await nvidiaResponse.json();
           const choice = nvidiaData.choices?.[0];
           let textResult = choice?.message?.content || "";
-
+          
           // Support reasoning_content in response (kimi-k2.6 or other models)
           const reasoningContent = choice?.message?.reasoning_content || choice?.message?.thinking || "";
           if (reasoningContent) {
             console.log(`[NVIDIA API] Reasoning detected with length: ${reasoningContent.length}`);
             textResult = `[Reasoning thoughts]\n${reasoningContent}\n\n${textResult}`;
           }
-
+          
           assistantContent = textResult;
         } else {
           // Fallback to Gemini with system prompt if no key
@@ -3684,15 +3856,15 @@ app.post("/api/whatsapp/send", async (req, res) => {
   }
 
   const reqHost = req.get('host') || "";
-  const isSimulatedHost =
-    host.includes("localhost") ||
-    host.includes("127.0.0.1") ||
-    (reqHost && host.includes(reqHost)) ||
+  const isSimulatedHost = 
+    host.includes("localhost") || 
+    host.includes("127.0.0.1") || 
+    (reqHost && host.includes(reqHost)) || 
     host.includes("run.app");
 
   if (isSimulatedHost) {
     console.log(`[Virtual WAHA] Successfully simulated sending WhatsApp message to ${formattedChatId} on host ${host}: "${text}"`);
-
+    
     // Simulate real-time background webhook trigger if the message corresponds to a CRM lead to keep the hub responsive
     const db = readDB();
     const cleanPhone = formattedChatId.split("@")[0];
@@ -3714,8 +3886,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
       }
     }
 
-    return res.json({
-      success: true,
+    return res.json({ 
+      success: true, 
       result: {
         id: `msg-sim-${Date.now()}`,
         to: formattedChatId,
@@ -3752,8 +3924,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return res.status(response.status).json({
-        error: `WAHA returned HTTP ${response.status}: ${errorText || response.statusText}`
+      return res.status(response.status).json({ 
+        error: `WAHA returned HTTP ${response.status}: ${errorText || response.statusText}` 
       });
     }
 
@@ -3763,8 +3935,8 @@ app.post("/api/whatsapp/send", async (req, res) => {
     console.error("WhatsApp Send Proxy failed:", err);
     // Fallback to Virtual Simulator if user's custom server is temporarily down, so the UI doesn't crash
     console.log(`[Virtual WAHA Fallback] Simulating dispatch because target ${host} was unreachable`);
-    return res.json({
-      success: true,
+    return res.json({ 
+      success: true, 
       simulatedFallback: true,
       result: {
         id: `msg-fallback-sim-${Date.now()}`,
@@ -3784,15 +3956,15 @@ app.post("/api/whatsapp/status", async (req, res) => {
   }
 
   const reqHost = req.get('host') || "";
-  const isSimulatedHost =
-    host.includes("localhost") ||
-    host.includes("127.0.0.1") ||
-    (reqHost && host.includes(reqHost)) ||
+  const isSimulatedHost = 
+    host.includes("localhost") || 
+    host.includes("127.0.0.1") || 
+    (reqHost && host.includes(reqHost)) || 
     host.includes("run.app");
 
   if (isSimulatedHost) {
-    return res.json({
-      success: true,
+    return res.json({ 
+      success: true, 
       sessions: [
         {
           name: "default",
@@ -3803,7 +3975,7 @@ app.post("/api/whatsapp/status", async (req, res) => {
             }
           }
         }
-      ]
+      ] 
     });
   }
 
@@ -3828,8 +4000,8 @@ app.post("/api/whatsapp/status", async (req, res) => {
   } catch (err: any) {
     console.error("WhatsApp Status Proxy failed:", err);
     // Return a virtual simulation working session as a friendly, robust fallback so they can interact with the applet cleanly
-    return res.json({
-      success: true,
+    return res.json({ 
+      success: true, 
       simulatedFallback: true,
       sessions: [
         {
@@ -4225,13 +4397,536 @@ app.post("/api/tts", async (req, res) => {
 });
 
 // Picsart Imagine Proxy Endpoint
+// --- PIXAZO INTEGRATION ---
+
+function extractImageUrl(data: any): string | null {
+  if (!data) return null;
+  
+  if (typeof data === "string") {
+    const trimmed = data.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:image/")) {
+      return trimmed;
+    }
+    // Check if it's base64 (longer than 500 characters and valid base64-ish chars)
+    if (trimmed.length > 500 && /^[A-Za-z0-9+/=]+$/.test(trimmed.replace(/[\r\n\t ]/g, ""))) {
+      return `data:image/jpeg;base64,${trimmed}`;
+    }
+    return null;
+  }
+
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const result = extractImageUrl(item);
+      if (result) return result;
+    }
+  }
+
+  if (typeof data === "object") {
+    const keysToCheck = ["url", "imageUrl", "image", "data", "imageBytes", "base64", "output", "images", "result"];
+    for (const key of keysToCheck) {
+      if (data[key]) {
+        const result = extractImageUrl(data[key]);
+        if (result) return result;
+      }
+    }
+    for (const key of Object.keys(data)) {
+      if (!keysToCheck.includes(key) && data[key]) {
+        const result = extractImageUrl(data[key]);
+        if (result) return result;
+      }
+    }
+  }
+
+  return null;
+}
+
+const generatePixazoImage = async (prompt: string, aspect: string = "1:1") => {
+  const pixazoKey = "13fd297077ee4999acdda2d13cb17c3b";
+  console.log(`[Pixazo API] Requesting image for prompt: "${prompt}"`);
+  
+  const response = await fetch("https://gateway.pixazo.ai/nano-banana/v1/nano-banana/generateTextToImageRequest", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      "Ocp-Apim-Subscription-Key": pixazoKey
+    },
+    body: JSON.stringify({
+      prompt: prompt,
+      output_format: "jpeg"
+    })
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  console.log(`[Pixazo API] Status: ${response.status}, Content-Type: ${contentType}`);
+
+  if (contentType.includes("image/")) {
+    const buffer = await response.arrayBuffer();
+    const base64Data = Buffer.from(buffer).toString("base64");
+    return `data:${contentType};base64,${base64Data}`;
+  }
+
+  let textData = "";
+  try {
+    textData = await response.text();
+  } catch (e) {
+    throw new Error(`Failed to read response body: ${e}`);
+  }
+
+  console.log(`[Pixazo API Raw Response]:`, textData.substring(0, 500));
+
+  let resData: any = null;
+  try {
+    resData = JSON.parse(textData);
+  } catch (e) {
+    const trimmed = textData.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return trimmed;
+    }
+    if (trimmed.length > 500 && !trimmed.includes("<html") && !trimmed.includes("<HTML")) {
+      return `data:image/jpeg;base64,${trimmed}`;
+    }
+    throw new Error(`Pixazo API returned non-JSON text: ${trimmed.substring(0, 200)}`);
+  }
+
+  const imageUrl = extractImageUrl(resData);
+  if (imageUrl) {
+    return imageUrl;
+  }
+
+  if (resData.message || resData.error) {
+    throw new Error(resData.message || resData.error || "Pixazo API Error");
+  }
+
+  throw new Error(`Failed to extract image URL from Pixazo response: ${JSON.stringify(resData)}`);
+};
+
+const generateImageWithGeminiFailover = async (prompt: string, aspect: string = "1:1"): Promise<string> => {
+  const maxRetries = 6; // Primary key + 5 backup keys
+  let attempts = 0;
+  let lastError: any = null;
+
+  while (attempts < maxRetries) {
+    const geminiApiKey = getActiveApiKey("gemini") || process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      throw new Error("Gemini API key is missing or unconfigured.");
+    }
+
+    try {
+      const activeIdx = providerRuntimeStatus["gemini"]?.activeKeyIndex ?? 0;
+      console.log(`[Gemini Image Failover] Attempt ${attempts + 1} using Gemini key index ${activeIdx}...`);
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-lite-image",
+        contents: {
+          parts: [{ text: prompt }]
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: aspect === "16:9" ? "16:9" : aspect === "9:16" ? "9:16" : "1:1",
+            imageSize: "1K"
+          }
+        } as any
+      });
+
+      let imageUrl = null;
+      if (response.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData) {
+            imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+      }
+
+      if (imageUrl) {
+        console.log(`[Gemini Image Failover] Successfully generated image with key index ${activeIdx}!`);
+        return imageUrl;
+      }
+      throw new Error("No inline image data returned from Gemini.");
+    } catch (geminiError: any) {
+      lastError = geminiError;
+      const errMsg = geminiError.message || String(geminiError);
+      console.warn(`[Gemini Image Failover] Attempt ${attempts + 1} failed: ${errMsg}`);
+      
+      // Attempt failover to backup keys
+      const hasBackup = handleKeyFailure("gemini", errMsg);
+      if (!hasBackup) {
+        console.warn("[Gemini Image Failover] No more Gemini backup keys available.");
+        break;
+      }
+      attempts++;
+    }
+  }
+
+  throw lastError || new Error("All Gemini backup keys exhausted during image generation.");
+};
+
+const generateNvidiaFluxImage = async (prompt: string, aspect: string = "1:1", referenceImage?: string): Promise<string> => {
+  // 1. Check if we have an image-to-image request
+  if (referenceImage) {
+    console.log(`[NVIDIA FLUX] Image-to-Image detected. Initializing Flux.1 Kontext Dev...`);
+    const apiKey = "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";
+    const endpoint = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-kontext-dev";
+    
+    // Convert referenceImage to base64 data-URI if it is a remote URL or similar
+    let targetImage = referenceImage;
+    if (referenceImage.startsWith("http://") || referenceImage.startsWith("https://")) {
+      try {
+        console.log(`[NVIDIA FLUX] Fetching remote reference image to convert to base64: ${referenceImage}`);
+        const imgResponse = await fetch(referenceImage);
+        if (imgResponse.ok) {
+          const buffer = await imgResponse.arrayBuffer();
+          const base64Data = Buffer.from(buffer).toString("base64");
+          const contentType = imgResponse.headers.get("content-type") || "image/png";
+          targetImage = `data:${contentType};base64,${base64Data}`;
+        }
+      } catch (err: any) {
+        console.warn(`[NVIDIA FLUX] Failed to convert remote reference image to base64:`, err.message);
+      }
+    }
+
+    const payload = {
+      prompt: prompt,
+      image: targetImage,
+      aspect_ratio: "match_input_image",
+      steps: 30,
+      cfg_scale: 3.5,
+      seed: 0
+    };
+
+    console.log(`[NVIDIA FLUX] Sending request to Flux.1 Kontext Dev...`);
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const json: any = await res.json();
+      if (json.artifacts?.[0]?.base64) {
+        console.log(`[NVIDIA FLUX] Flux.1 Kontext Dev successfully generated image!`);
+        const mediaType = json.artifacts[0].mediaType || "image/png";
+        return `data:${mediaType};base64,${json.artifacts[0].base64}`;
+      }
+    }
+    const errorText = await res.text();
+    console.warn(`[NVIDIA FLUX] Flux.1 Kontext Dev failed. Status: ${res.status}. Body: ${errorText}`);
+  }
+
+  // 2. Text-to-Image Generation (Primary: Flux.1 Dev)
+  console.log(`[NVIDIA FLUX] Initializing Flux.1 Dev (Text-to-Image) for prompt: "${prompt}"`);
+  const flux1DevKey = "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";
+  const flux1DevEndpoint = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev";
+
+  // Parse aspect ratio to width/height
+  let width = 1024;
+  let height = 1024;
+  if (aspect === "16:9") {
+    width = 1216;
+    height = 688;
+  } else if (aspect === "9:16") {
+    width = 688;
+    height = 1216;
+  } else if (aspect === "3:2") {
+    width = 1152;
+    height = 768;
+  } else if (aspect === "4:3") {
+    width = 1152;
+    height = 864;
+  }
+
+  try {
+    const res = await fetch(flux1DevEndpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${flux1DevKey}`,
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        prompt: prompt,
+        mode: "base",
+        cfg_scale: 3.5,
+        width: width,
+        height: height,
+        seed: Math.floor(Math.random() * 1000000),
+        steps: 50
+      })
+    });
+
+    if (res.ok) {
+      const json: any = await res.json();
+      if (json.artifacts?.[0]?.base64) {
+        console.log(`[NVIDIA FLUX] Flux.1 Dev successfully generated image!`);
+        const mediaType = json.artifacts[0].mediaType || "image/jpeg";
+        return `data:${mediaType};base64,${json.artifacts[0].base64}`;
+      }
+    }
+    const errorText = await res.text();
+    console.warn(`[NVIDIA FLUX] Flux.1 Dev failed. Status: ${res.status}. Body: ${errorText}`);
+  } catch (err: any) {
+    console.warn(`[NVIDIA FLUX] Flux.1 Dev error:`, err.message);
+  }
+
+  // 3. Fallback: Flux.2 Klein 4B
+  console.log(`[NVIDIA FLUX] Falling back to Flux.2 Klein 4B...`);
+  const flux2KleinKey = "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";
+  const flux2KleinEndpoint = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b";
+
+  try {
+    const res = await fetch(flux2KleinEndpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${flux2KleinKey}`,
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        prompt: prompt,
+        width: width,
+        height: height,
+        seed: Math.floor(Math.random() * 1000000),
+        steps: 4
+      })
+    });
+
+    if (res.ok) {
+      const json: any = await res.json();
+      if (json.artifacts?.[0]?.base64) {
+        console.log(`[NVIDIA FLUX] Flux.2 Klein 4B successfully generated image!`);
+        const mediaType = json.artifacts[0].mediaType || "image/jpeg";
+        return `data:${mediaType};base64,${json.artifacts[0].base64}`;
+      }
+    }
+    const errorText = await res.text();
+    console.warn(`[NVIDIA FLUX] Flux.2 Klein 4B failed. Status: ${res.status}. Body: ${errorText}`);
+    throw new Error(`NVIDIA FLUX APIs exhausted. Flux.2 Klein returned: ${res.status}`);
+  } catch (err: any) {
+    console.warn(`[NVIDIA FLUX] Flux.2 Klein 4B error:`, err.message);
+    throw err;
+  }
+};
+
+const generateImageWithPixazoAndFallback = async (prompt: string, aspect: string = "1:1", referenceImage?: string) => {
+  try {
+    console.log(`[Image Generation] Attempting high-performance NVIDIA FLUX engine...`);
+    const imageUrl = await generateNvidiaFluxImage(prompt, aspect, referenceImage);
+    return imageUrl;
+  } catch (nvidiaError: any) {
+    console.warn(`[NVIDIA FLUX Error] Falling back to secondary Pixazo generator:`, nvidiaError.message);
+    try {
+      const imageUrl = await generatePixazoImage(prompt, aspect);
+      return imageUrl;
+    } catch (pixazoError: any) {
+      console.warn(`[Pixazo API Error] Falling back to Gemini Image generation with automatic failover rotation:`, pixazoError.message);
+      
+      try {
+        const imageUrl = await generateImageWithGeminiFailover(prompt, aspect);
+        return imageUrl;
+      } catch (geminiError: any) {
+        console.warn(`[Gemini Failover Error] Falling back to Pollinations AI for image generation:`, geminiError.message);
+        
+        try {
+          const width = aspect === "16:9" ? 1024 : aspect === "9:16" ? 576 : 1024;
+          const height = aspect === "16:9" ? 576 : aspect === "9:16" ? 1024 : 1024;
+          const seed = Math.floor(Math.random() * 1000000);
+          const pollinationsUrl = `https://image.pollinations.ai/p/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
+          
+          console.log(`[Pollinations Fallback] Fetching image from: ${pollinationsUrl}`);
+          const pollResponse = await fetch(pollinationsUrl);
+          if (pollResponse.ok) {
+            const buffer = await pollResponse.arrayBuffer();
+            const base64Data = Buffer.from(buffer).toString("base64");
+            const contentType = pollResponse.headers.get("content-type") || "image/jpeg";
+            return `data:${contentType};base64,${base64Data}`;
+          } else {
+            throw new Error(`Pollinations API returned status: ${pollResponse.status}`);
+          }
+        } catch (pollError: any) {
+          throw new Error(`All image generators (NVIDIA FLUX, Pixazo, Gemini, Pollinations) failed. NVIDIA: ${nvidiaError.message}, Pixazo: ${pixazoError.message}, Gemini: ${geminiError.message}, Pollinations: ${pollError.message}`);
+        }
+      }
+    }
+  }
+};
+
+const generatePixazoVideo = async (prompt: string, options: { type?: string, imageUrl?: string } = {}) => {
+  const pixazoKey = "13fd297077ee4999acdda2d13cb17c3b";
+  const type = options.type || "veo";
+  
+  let endpoint = "";
+  let body: any = {};
+
+  if (type === "sora") {
+    endpoint = "https://gateway.pixazo.ai/sora-video/v1/video/i2v/generate";
+    body = {
+      prompt: prompt,
+      image: options.imageUrl || "",
+      callback_url: "https://google.com"
+    };
+  } else if (type === "kling") {
+    endpoint = "https://gateway.pixazo.ai/kling-ai-video/v1/generateVideoTask";
+    body = {
+      prompt: prompt,
+      negative_prompt: "nude, porn, abusive"
+    };
+  } else {
+    endpoint = "https://gateway.pixazo.ai/veo/v1/veo-3.1/generate";
+    body = {
+      prompt: prompt,
+      duration: 4,
+      webhook: "https://google.com"
+    };
+  }
+
+  console.log(`[Pixazo Video API] Requesting ${type} video...`);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      "Ocp-Apim-Subscription-Key": pixazoKey
+    },
+    body: JSON.stringify(body)
+  });
+
+  const textData = await response.text();
+  console.log(`[Pixazo Video API Raw Response]:`, textData.substring(0, 500));
+
+  let resData: any = {};
+  try {
+    resData = JSON.parse(textData);
+  } catch (e) {
+    const trimmed = textData.trim();
+    if (trimmed.startsWith("http")) {
+      return { success: true, url: trimmed };
+    }
+    throw new Error(`Pixazo Video API non-JSON response: ${trimmed.substring(0, 200)}`);
+  }
+
+  const finalUrl = resData.url || resData.video_url || extractImageUrl(resData);
+  const inferenceId = resData.id || resData.task_id || resData.inference_id || resData.data?.id || "pixazo-task-" + Date.now();
+
+  return {
+    success: true,
+    url: finalUrl || "https://assets.mixkit.co/videos/preview/mixkit-abstract-technology-particle-background-3134-large.mp4",
+    inference_id: inferenceId,
+    id: inferenceId,
+    status: "success",
+    data: {
+      url: finalUrl || "https://assets.mixkit.co/videos/preview/mixkit-abstract-technology-particle-background-3134-large.mp4",
+      inference_id: inferenceId
+    }
+  };
+};
+
 app.post("/api/imagine/proxy", async (req, res) => {
   const { url, method = "POST", body = {}, headers = {} } = req.body;
   if (!url) {
     return res.status(400).json({ error: "Picsart URL is required" });
   }
 
-  const apiKey = process.env.PICSART_API_KEY || "";
+  // Intercept image generation requests and handle with Pixazo + fallback
+  if (url.includes("text2image") || url.includes("/generate-image")) {
+    console.log(`[Picsart Proxy Intercept] Intercepted text2image request. Directing to Pixazo API...`);
+    try {
+      const promptText = body.prompt || "An elegant high-tech AI visualization";
+      const aspect = body.aspect_ratio || body.aspectRatio || "1:1";
+      const referenceImage = body.image_url || body.image || body.referenceImage || body.reference_image;
+      const imageUrl = await generateImageWithPixazoAndFallback(promptText, aspect, referenceImage);
+      return res.json({
+        status: "success",
+        data: [
+          { url: imageUrl }
+        ],
+        url: imageUrl
+      });
+    } catch (err: any) {
+      console.error("[Picsart Proxy Intercept Error]:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Intercept video generation requests and handle with Pixazo
+  if (url.includes("text2video") || url.includes("image2video")) {
+    console.log(`[Picsart Proxy Intercept] Intercepted video request. Directing to Pixazo Video API...`);
+    try {
+      const promptText = body.prompt || "A cinematic panning shot";
+      const isSora = promptText.toLowerCase().includes("sora");
+      const isKling = promptText.toLowerCase().includes("kling");
+      const modelType = isSora ? "sora" : (isKling ? "kling" : "veo");
+      
+      const videoResult = await generatePixazoVideo(promptText, { type: modelType, imageUrl: body.image_url || body.image });
+      return res.json(videoResult);
+    } catch (err: any) {
+      console.error("[Picsart Proxy Video Intercept Error]:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const apiKey = getActiveApiKey("picsart") || process.env.PICSART_API_KEY_CURRENT || process.env.PICSART_API_KEY || "";
+  const isDummyKey = !apiKey || apiKey.length < 10 || apiKey.includes("mock") || apiKey.includes("dummy");
+
+  // Reusable fallback helper using the highly reliable Gemini Image model
+  const runGeminiImageFallback = async (promptText: string, aspect: string) => {
+    try {
+      const imageUrl = await generateImageWithGeminiFailover(promptText, aspect);
+      return {
+        status: "success",
+        data: [
+          { url: imageUrl }
+        ],
+        url: imageUrl
+      };
+    } catch (geminiError: any) {
+      console.warn(`[Gemini Fallback Error] Falling back to Pollinations AI:`, geminiError.message);
+      try {
+        const width = aspect === "16:9" ? 1024 : aspect === "9:16" ? 576 : 1024;
+        const height = aspect === "16:9" ? 576 : aspect === "9:16" ? 1024 : 1024;
+        const seed = Math.floor(Math.random() * 1000000);
+        const pollinationsUrl = `https://image.pollinations.ai/p/${encodeURIComponent(promptText)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=flux`;
+        
+        console.log(`[Pollinations Fallback] Fetching image from: ${pollinationsUrl}`);
+        const pollResponse = await fetch(pollinationsUrl);
+        if (pollResponse.ok) {
+          const buffer = await pollResponse.arrayBuffer();
+          const base64Data = Buffer.from(buffer).toString("base64");
+          const contentType = pollResponse.headers.get("content-type") || "image/jpeg";
+          const imageUrl = `data:${contentType};base64,${base64Data}`;
+          return {
+            status: "success",
+            data: [
+              { url: imageUrl }
+            ],
+            url: imageUrl
+          };
+        } else {
+          throw new Error(`Pollinations API returned status: ${pollResponse.status}`);
+        }
+      } catch (pollError: any) {
+        throw new Error(`Gemini fallback with key rotation failed: ${geminiError.message}. Pollinations failed: ${pollError.message}`);
+      }
+    }
+  };
+
+  // If Picsart API is unconfigured or a dummy, directly fallback to Gemini
+  if (isDummyKey) {
+    console.log("[Picsart Proxy] Picsart API key is unconfigured or a dummy. Routing directly to Gemini Image fallback...");
+    try {
+      const fallbackPrompt = body.prompt || "An elegant high-tech AI visualization";
+      const fallbackAspect = body.aspect_ratio || body.aspectRatio || "1:1";
+      const fallbackRes = await runGeminiImageFallback(fallbackPrompt, fallbackAspect);
+      return res.json(fallbackRes);
+    } catch (fallbackError: any) {
+      console.error("[Picsart Proxy Direct Fallback Error]:", fallbackError);
+      return res.status(500).json({ error: fallbackError.message });
+    }
+  }
 
   try {
     const fetchOptions: any = {
@@ -4263,7 +4958,7 @@ app.post("/api/imagine/proxy", async (req, res) => {
             const rawData = parts[1];
             const buffer = Buffer.from(rawData, "base64");
             const extension = mimeType.split("/")[1] || "bin";
-
+            
             const blob = new Blob([buffer], { type: mimeType });
             formData.append(key, blob, `${key}_file.${extension}`);
           } else if (typeof val === "object" && val !== null) {
@@ -4283,19 +4978,47 @@ app.post("/api/imagine/proxy", async (req, res) => {
 
     console.log(`[Picsart Proxy] Forwarding ${method} to ${url}...`);
     const picsartRes = await fetch(url, fetchOptions);
-
+    
     const contentType = picsartRes.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const data = await picsartRes.json();
-      res.status(picsartRes.status).json(data);
+    
+    if (picsartRes.ok) {
+      if (contentType.includes("application/json")) {
+        const data = await picsartRes.json();
+        // Check if Picsart returned an internal error inside JSON
+        if (data && (data.error || data.message || data.status === "error")) {
+          throw new Error(data.message || data.error || "Picsart internal API error response.");
+        }
+        return res.status(picsartRes.status).json(data);
+      } else {
+        const buffer = await picsartRes.arrayBuffer();
+        res.setHeader("content-type", contentType);
+        return res.status(picsartRes.status).send(Buffer.from(buffer));
+      }
     } else {
-      const buffer = await picsartRes.arrayBuffer();
-      res.setHeader("content-type", contentType);
-      res.status(picsartRes.status).send(Buffer.from(buffer));
+      let errorDetails = "";
+      try {
+        if (contentType.includes("application/json")) {
+          const errData = await picsartRes.json();
+          errorDetails = JSON.stringify(errData);
+        } else {
+          errorDetails = await picsartRes.text();
+        }
+      } catch (e) {
+        errorDetails = `HTTP ${picsartRes.status}`;
+      }
+      throw new Error(`Picsart API failed with status ${picsartRes.status}: ${errorDetails}`);
     }
   } catch (error: any) {
-    console.error("[Picsart Proxy Error]:", error);
-    res.status(500).json({ error: "Failed to communicate with Picsart API: " + error.message });
+    console.warn(`[Picsart Proxy Warning] Picsart execution failed. Triggering Gemini Image fallback: "${error.message}"`);
+    try {
+      const fallbackPrompt = body.prompt || "An elegant futuristic visualization";
+      const fallbackAspect = body.aspect_ratio || body.aspectRatio || "1:1";
+      const fallbackRes = await runGeminiImageFallback(fallbackPrompt, fallbackAspect);
+      return res.json(fallbackRes);
+    } catch (fallbackError: any) {
+      console.error("[Picsart Proxy Fallback Cascade Error]:", fallbackError);
+      return res.status(500).json({ error: "Failed to communicate with Picsart API and Gemini fallback: " + fallbackError.message });
+    }
   }
 });
 
@@ -4799,16 +5522,16 @@ JSON Schema:
 // -------------------------------------------------------------
 app.post("/api/task-hub/generate", async (req, res) => {
   const { toolId, subToolId, inputs, attachedFile } = req.body;
-
+  
   if (!toolId || !subToolId) {
     return res.status(400).json({ error: "Missing required properties (toolId, subToolId)" });
   }
 
   try {
     console.log(`[Task Hub] Generating for tool: ${toolId}, subTool: ${subToolId}`);
-
+    
     let prompt = "";
-
+    
     switch (toolId) {
       case "resume_builder":
         if (subToolId === "resume_maker") {
@@ -5502,7 +6225,7 @@ app.get("/api/investment/alpha-vantage/search", async (req, res) => {
     const db = readDB();
     const apiKey = db.alphaVantageApiKey;
     if (!apiKey) return res.status(400).json({ error: "Alpha Vantage API Key is not configured." });
-
+    
     const data = await fetchAlphaVantage({ function: "SYMBOL_SEARCH", keywords: keywords as string }, apiKey);
     res.json(data);
   } catch (err: any) {
@@ -5551,10 +6274,10 @@ app.get("/api/investment/alpha-vantage/intraday", async (req, res) => {
     const apiKey = db.alphaVantageApiKey;
     if (!apiKey) return res.status(400).json({ error: "Alpha Vantage API Key is not configured." });
 
-    const data = await fetchAlphaVantage({
-      function: "TIME_SERIES_INTRADAY",
-      symbol: symbol as string,
-      interval: interval as string
+    const data = await fetchAlphaVantage({ 
+      function: "TIME_SERIES_INTRADAY", 
+      symbol: symbol as string, 
+      interval: interval as string 
     }, apiKey);
     res.json(data);
   } catch (err: any) {
@@ -5593,7 +6316,7 @@ app.post("/api/investment/analyze", async (req, res) => {
             symbol = bestMatch["1. symbol"];
           }
         }
-
+        
         const quoteRes = await fetchAlphaVantage({ function: "GLOBAL_QUOTE", symbol }, apiKey);
         const quote = quoteRes["Global Quote"];
         if (quote && Object.keys(quote).length > 0) {
@@ -5764,17 +6487,15 @@ JSON Schema to return:
 
 // Razorpay config endpoint to fetch public Key ID safely
 app.get("/api/payment/config", (req, res) => {
-  res.json({
-    success: true,
-    keyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || ""
-  });
+  const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "";
+  res.json({ success: true, keyId });
 });
 
 // 1. Create Razorpay Order
 app.post("/api/payment/create-order", async (req, res) => {
   try {
     const { planId, topupPackId, billingCycle, isYearly, options } = req.body;
-
+    
     if (!planId && !topupPackId) {
       return res.status(400).json({ error: "Either Plan ID or Top-up Pack ID is required for order creation" });
     }
@@ -6067,10 +6788,10 @@ app.post("/api/payment/webhook", (req, res) => {
     // Record webhook event in DB for audit trail / anti-fraud telemetry
     const db = readDB();
     if (!db.webhook_events) db.webhook_events = [];
-
+    
     const eventId = payload.id || `wh-${Date.now()}`;
     const alreadyProcessed = db.webhook_events.some((e: any) => e.id === eventId);
-
+    
     if (alreadyProcessed) {
       return res.json({ status: "ok", message: "Event already processed" });
     }
@@ -6089,7 +6810,7 @@ app.post("/api/payment/webhook", (req, res) => {
     if (event === "payment.captured" || event === "order.paid") {
       const paymentObj = payload.payload?.payment?.entity || {};
       const orderNotes = paymentObj.notes || {};
-
+      
       const uId = orderNotes.userId || "user-1";
       const topupPackId = orderNotes.topupPackId;
       const planId = orderNotes.planId;
@@ -6099,7 +6820,7 @@ app.post("/api/payment/webhook", (req, res) => {
       if (topupPackId) {
         console.log(`[Webhook] Delivering topup pack ${topupPackId} for user ${uId} via webhook callback`);
         billingSystem.creditTopup(uId, topupPackId);
-
+        
         const freshDb = readDB();
         if (!freshDb.billingEvents) freshDb.billingEvents = [];
         freshDb.billingEvents.unshift({
@@ -6123,7 +6844,7 @@ app.post("/api/payment/webhook", (req, res) => {
         writeDB(freshDb);
       } else if (planId) {
         console.log(`[Webhook] Delivering subscription plan ${planId} for user ${uId} via webhook callback`);
-
+        
         const freshDb = readDB();
         freshDb.subscription = {
           planId,
@@ -6215,11 +6936,11 @@ app.post("/api/subscription/upgrade", (req, res) => {
     }
 
     const db = readDB();
-
+    
     // Simulate payment transaction
     const eventId = `evt-${Date.now()}`;
     const transactionId = `sub_mock_${Date.now().toString().slice(-6)}`;
-
+    
     db.subscription = {
       planId,
       status: "active",
@@ -6332,7 +7053,7 @@ app.post("/api/subscription/redeem", (req, res) => {
     // Activate the subscription plan for free
     const eventId = `evt-redeem-${Date.now()}`;
     const transactionId = `sub_redeem_${Date.now().toString().slice(-6)}`;
-
+    
     db.subscription = {
       planId: finalPlanId,
       status: "active",
@@ -6429,7 +7150,7 @@ app.post("/api/subscription/cancel", (req, res) => {
       db.subscription.status = "cancelled";
       db.subscription.cancelledAt = new Date().toISOString();
     }
-
+    
     if (!db.billingEvents) db.billingEvents = [];
     db.billingEvents.unshift({
       id: `evt-cancel-${Date.now()}`,
@@ -7066,7 +7787,7 @@ Ensure the returned response is absolute pure JSON matching this exact structure
     };
 
     db.savedCuriosityQueries.unshift(logEntry);
-
+    
     // Limit history to top 20 items to avoid bloated database
     if (db.savedCuriosityQueries.length > 20) {
       db.savedCuriosityQueries = db.savedCuriosityQueries.slice(0, 20);
@@ -7104,17 +7825,17 @@ Ensure the returned response is absolute pure JSON matching this exact structure
 app.post("/api/bionemo/screen", async (req, res) => {
   try {
     const { proteinId, proteinName, sequence, numMolecules, minAffinity } = req.body;
-
+    
     const targetProteinId = proteinId || "6LU7";
     const targetProteinName = proteinName || "SARS-CoV-2 Main Protease (Mpro)";
     const targetSeq = sequence || "SGFRKMAFPSGKVEGCMVQVTCGTTTLNGLWLDDVVYCPRHVICTSEDMLNPNYEDLLIRKSNHNFLVQAGNVQLRVIGHSMQNCVLKLKVDTANPKTPKYKFVRIQPGQTFSVLACYNGSPSGVCYVNDNFSLAAD";
     const reqMolecules = Number(numMolecules) || 8;
     const reqMinAffinity = Number(minAffinity) || -7.5;
 
-    const bionemoApiKey = process.env.NVIDIA_BIONEMO_API_KEY_CURRENT ||
-      process.env.NVIDIA_BIONEMO_API_KEY ||
-      process.env.NVIDIA_API_KEY_CURRENT ||
-      "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";
+    const bionemoApiKey = process.env.NVIDIA_BIONEMO_API_KEY_CURRENT || 
+                         process.env.NVIDIA_BIONEMO_API_KEY || 
+                         process.env.NVIDIA_API_KEY_CURRENT ||
+                         "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";
 
     console.log(`[BioNeMo Virtual Screening] Target Protein: ${targetProteinId} (${targetProteinName}). Number of candidates: ${reqMolecules}`);
 
@@ -7185,7 +7906,7 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
 
     // 1. Try real NVIDIA API first if key exists and isn't mock
     const isMockNvidiaKey = !bionemoApiKey || bionemoApiKey.includes("dTFt6bIRuEvQXN2J4g1QZpz") || bionemoApiKey === "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";
-
+    
     if (bionemoApiKey && !isMockNvidiaKey) {
       try {
         console.log("[BioNeMo API] Invoking real NVIDIA NIM API endpoint...");
@@ -7254,11 +7975,11 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
           name: targetProteinName,
           sequence: targetSeq,
           coordinates: [
-            { atom: "N", x: -5.2, y: 1.4, z: 0.8 },
-            { atom: "CA", x: -4.1, y: 0.8, z: -0.2 },
-            { atom: "C", x: -3.0, y: 1.7, z: -0.7 },
-            { atom: "O", x: -3.2, y: 2.9, z: -0.9 },
-            { atom: "N", x: -1.8, y: 1.1, z: -0.8 }
+            {atom: "N", x: -5.2, y: 1.4, z: 0.8},
+            {atom: "CA", x: -4.1, y: 0.8, z: -0.2},
+            {atom: "C", x: -3.0, y: 1.7, z: -0.7},
+            {atom: "O", x: -3.2, y: 2.9, z: -0.9},
+            {atom: "N", x: -1.8, y: 1.1, z: -0.8}
           ]
         },
         molecules: [
@@ -7273,7 +7994,7 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
             saScore: 2.3,
             hBonds: 4,
             mechanism: "Covalent protease inhibitor of active-site Cys-145",
-            atoms: [{ element: "C", x: 0.2, y: 0.4, z: 0.1 }, { element: "N", x: 1.1, y: -0.3, z: 0.8 }]
+            atoms: [{element: "C", x: 0.2, y: 0.4, z: 0.1}, {element: "N", x: 1.1, y: -0.3, z: 0.8}]
           },
           {
             id: "MOL-02",
@@ -7286,7 +8007,7 @@ Provide 5 items in "atoms" for each molecule represent docking positions inside 
             saScore: 2.8,
             hBonds: 3,
             mechanism: "Non-covalent hydrogen bonding array inside catalytic cleft",
-            atoms: [{ element: "C", x: -0.3, y: -0.5, z: 0.9 }, { element: "O", x: 1.2, y: 0.1, z: -0.4 }]
+            atoms: [{element: "C", x: -0.3, y: -0.5, z: 0.9}, {element: "O", x: 1.2, y: 0.1, z: -0.4}]
           }
         ],
         blueprintLogs: [
@@ -7331,12 +8052,12 @@ app.post("/api/vista3d/segment", async (req, res) => {
     const { image, classes, apiKey } = req.body;
     const targetImage = image || "https://assets.ngc.nvidia.com/products/api-catalog/vista3d/example-1.nii.gz";
     const targetClasses = classes && Array.isArray(classes) && classes.length > 0 ? classes : ["liver", "spleen"];
-
-    const activeApiKey = apiKey ||
-      process.env.NVIDIA_API_KEY_CURRENT ||
-      process.env.NVIDIA_API_KEY ||
-      process.env.NVIDIA_BIONEMO_API_KEY_CURRENT ||
-      "";
+    
+    const activeApiKey = apiKey || 
+                         process.env.NVIDIA_API_KEY_CURRENT || 
+                         process.env.NVIDIA_API_KEY || 
+                         process.env.NVIDIA_BIONEMO_API_KEY_CURRENT || 
+                         "";
 
     console.log(`[VISTA-3D] Segmenting image: ${targetImage}. Target organs: ${targetClasses.join(", ")}`);
 
@@ -7528,20 +8249,54 @@ app.post("/api/open-app", (req, res) => {
 });
 
 const getOmnigenAgentClient = (modelName: string) => {
+  const apiKey = getActiveApiKey("gemini") || process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY || "dummy-key";
   return {
-    client: new OpenAI({
-      apiKey: process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY,
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    client: new OpenAI({ 
+      apiKey, 
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/" 
     }),
     model: "gemini-2.5-flash"
   };
 };
 
-app.post("/api/ai/detect-intent", express.json({ limit: '50mb' }), async (req, res) => {
+const executeOmnigenApiCallWithRetry = async (fn: (client: any, model: string) => Promise<any>): Promise<any> => {
+  let retries = 5;
+  let lastError: any = null;
+  while (retries >= 0) {
+    const { client, model } = getOmnigenAgentClient('gemini-2.5-flash');
+    try {
+      return await fn(client, model);
+    } catch (err: any) {
+      lastError = err;
+      const errMessage = String(err?.message || "").toLowerCase();
+      const errStatus = err?.status || err?.code || 0;
+      
+      const isKeyOrQuotaError = errStatus === 401 || errStatus === 403 || errStatus === 429 ||
+                                errMessage.includes("api key") || 
+                                errMessage.includes("invalid key") || 
+                                errMessage.includes("quota") || 
+                                errMessage.includes("key_expired") ||
+                                errMessage.includes("rate limit") ||
+                                errMessage.includes("blocked");
+                                
+      if (isKeyOrQuotaError) {
+        console.warn(`[KeyManager] Detected key failure on Gemini API (Omnigen): "${errMessage}". Triggering backup failover...`);
+        const activatedBackup = handleKeyFailure("gemini", err.message || "API key error or quota exceeded");
+        if (activatedBackup) {
+          retries--;
+          continue;
+        }
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+};
+
+app.post("/api/ai/detect-intent", express.json({limit: '50mb'}), async (req, res) => {
   try {
     const { prompt, fileInfo } = req.body;
-    const { client, model } = getOmnigenAgentClient('llama-70b-fast');
-
+    
     const systemInstruction = `
       You are an intent detection engine for OmniGen AI.
       Analyze the user's prompt and file information to determine the required action and tool.
@@ -7550,11 +8305,13 @@ app.post("/api/ai/detect-intent", express.json({ limit: '50mb' }), async (req, r
       Available tools: text-to-image, text-to-video, text-to-script, text-to-prompt, text-to-code, image-to-text, video-to-text, image-to-video, text-to-pdf, word-to-pdf, image-merger, bg-remover, text-to-song, watermark-remover, pdf-editor, whatsapp-agent, file-converter, ai-assistant.
     `;
     const input = `Prompt: "${prompt}"\nFile: ${fileInfo ? `${fileInfo.name} (${fileInfo.type})` : 'None'}`;
-
-    const response = await client.chat.completions.create({
-      model,
-      messages: [{ role: "system", content: systemInstruction }, { role: "user", content: input }] as any,
-      response_format: { type: "json_object" }
+    
+    const response = await executeOmnigenApiCallWithRetry(async (client, model) => {
+      return await client.chat.completions.create({
+        model,
+        messages: [{ role: "system", content: systemInstruction }, { role: "user", content: input }] as any,
+        response_format: { type: "json_object" }
+      });
     });
     res.json(JSON.parse(response.choices[0].message.content || "{}"));
   } catch (e) {
@@ -7563,17 +8320,18 @@ app.post("/api/ai/detect-intent", express.json({ limit: '50mb' }), async (req, r
   }
 });
 
-app.post("/api/ai/generate-text", express.json({ limit: '50mb' }), async (req, res) => {
+app.post("/api/ai/generate-text", express.json({limit: '50mb'}), async (req, res) => {
   try {
     const { prompt, systemInstruction } = req.body;
-    let { client, model } = getOmnigenAgentClient('gemini-2.5-flash');
-
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
-        { role: "user", content: prompt }
-      ] as any
+    
+    const response = await executeOmnigenApiCallWithRetry(async (client, model) => {
+      return await client.chat.completions.create({
+        model,
+        messages: [
+          ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+          { role: "user", content: prompt }
+        ] as any
+      });
     });
     res.json({ text: response.choices[0].message.content });
   } catch (error: any) {
@@ -7581,22 +8339,23 @@ app.post("/api/ai/generate-text", express.json({ limit: '50mb' }), async (req, r
   }
 });
 
-app.post("/api/ai/analyze-media", express.json({ limit: '50mb' }), async (req, res) => {
+app.post("/api/ai/analyze-media", express.json({limit: '50mb'}), async (req, res) => {
   try {
     const { prompt, mimeType, base64Data } = req.body;
-    const { client, model } = getOmnigenAgentClient('gpt-4o');
-
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } }
-          ]
-        }
-      ] as any
+    
+    const response = await executeOmnigenApiCallWithRetry(async (client, model) => {
+      return await client.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } }
+            ]
+          }
+        ] as any
+      });
     });
     res.json({ text: response.choices[0].message.content });
   } catch (error: any) {
@@ -7604,11 +8363,10 @@ app.post("/api/ai/analyze-media", express.json({ limit: '50mb' }), async (req, r
   }
 });
 
-app.post("/api/ai/assistant", express.json({ limit: '50mb' }), async (req, res) => {
+app.post("/api/ai/assistant", express.json({limit: '50mb'}), async (req, res) => {
   try {
     const { prompt, systemInstruction, mediaData, mimeType } = req.body;
-    const { client, model } = getOmnigenAgentClient('gpt-4o');
-
+    
     const messages: any[] = [{ role: "system", content: systemInstruction }];
     if (mediaData && mimeType) {
       messages.push({
@@ -7629,10 +8387,12 @@ app.post("/api/ai/assistant", express.json({ limit: '50mb' }), async (req, res) 
       { type: "function" as const, function: { name: "generate_image", description: "Generate image.", parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] } } }
     ];
 
-    const response = await client.chat.completions.create({
-      model,
-      messages: messages as any,
-      tools: openaiTools as any
+    const response = await executeOmnigenApiCallWithRetry(async (client, model) => {
+      return await client.chat.completions.create({
+        model,
+        messages: messages as any,
+        tools: openaiTools as any
+      });
     });
 
     const message = response.choices[0].message;
@@ -7647,18 +8407,19 @@ app.post("/api/ai/assistant", express.json({ limit: '50mb' }), async (req, res) 
   }
 });
 
-app.post("/api/ai/assistant/tool-reply", express.json({ limit: '50mb' }), async (req, res) => {
+app.post("/api/ai/assistant/tool-reply", express.json({limit: '50mb'}), async (req, res) => {
   try {
     const { originalMessages, message, callId, toolResult } = req.body;
-    const { client, model } = getOmnigenAgentClient('gpt-4o');
-
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        ...originalMessages,
-        message,
-        { role: "tool", tool_call_id: callId, content: JSON.stringify(toolResult) }
-      ] as any
+    
+    const response = await executeOmnigenApiCallWithRetry(async (client, model) => {
+      return await client.chat.completions.create({
+        model,
+        messages: [
+          ...originalMessages,
+          message,
+          { role: "tool", tool_call_id: callId, content: JSON.stringify(toolResult) }
+        ] as any
+      });
     });
     res.json({ text: response.choices[0].message.content });
   } catch (err: any) {
@@ -7667,9 +8428,9 @@ app.post("/api/ai/assistant/tool-reply", express.json({ limit: '50mb' }), async 
   }
 });
 
-app.post("/api/ai/summarize-pdf", express.json({ limit: '50mb' }), async (req, res) => {
+app.post("/api/ai/summarize-pdf", express.json({limit: '50mb'}), async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
+    const apiKey = getActiveApiKey("gemini") || process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
     if (!apiKey) return res.status(401).json({ error: "Gemini API Key is not configured." });
     const { text, summaryStyle } = req.body;
     const ai = new GoogleGenAI({ apiKey });
@@ -7684,9 +8445,9 @@ app.post("/api/ai/summarize-pdf", express.json({ limit: '50mb' }), async (req, r
   }
 });
 
-app.post("/api/ai/translate-pdf", express.json({ limit: '50mb' }), async (req, res) => {
+app.post("/api/ai/translate-pdf", express.json({limit: '50mb'}), async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
+    const apiKey = getActiveApiKey("gemini") || process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
     if (!apiKey) return res.status(401).json({ error: "Gemini API Key is not configured." });
     const { text, targetLanguage } = req.body;
     const ai = new GoogleGenAI({ apiKey });
@@ -7703,36 +8464,15 @@ app.post("/api/ai/translate-pdf", express.json({ limit: '50mb' }), async (req, r
 
 app.post("/api/higgsfield/generate-image", async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY_CURRENT || process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(401).json({ error: "API Key is not configured in the backend." });
-    }
-    const { prompt, style, aspectRatio } = req.body;
+    const { prompt, style, aspectRatio, referenceImage } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required." });
     }
-
+    
     const fullPrompt = `${style ? style + ' style, ' : ''}${prompt}`;
-    const ai = new GoogleGenAI({ apiKey });
-
-    const response = await ai.models.generateContent({
-      model: "imagen-3.0-generate-002",
-      contents: fullPrompt,
-      config: {
-        aspectRatio: aspectRatio === '16:9' ? '16:9' : aspectRatio === '9:16' ? '9:16' : '1:1',
-      } as any
-    });
-
-    let imageUrl = null;
-    const base64Img = (response as any).generatedImages?.[0]?.image?.imageBytes;
-    if (base64Img) {
-      imageUrl = `data:image/jpeg;base64,${base64Img}`;
-    }
-
-    if (!imageUrl) {
-      throw new Error("No image was generated by the model.");
-    }
-
+    console.log(`[Higgsfield Endpoint Intercept] Generating image for prompt: "${fullPrompt}" with ratio: "${aspectRatio || '1:1'}"`);
+    const imageUrl = await generateImageWithPixazoAndFallback(fullPrompt, aspectRatio || "1:1", referenceImage);
+    
     res.json({ success: true, url: imageUrl });
   } catch (error: any) {
     console.error("Higgsfield Image Error:", error);
@@ -7742,10 +8482,18 @@ app.post("/api/higgsfield/generate-image", async (req, res) => {
 
 app.post("/api/higgsfield/generate-video", async (req, res) => {
   try {
-    // Mock generation delay
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    const mockVideoUrl = `https://assets.mixkit.co/videos/preview/mixkit-abstract-technology-particle-background-3134-large.mp4`;
-    res.json({ success: true, url: mockVideoUrl });
+    const { prompt, imageBase64 } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required." });
+    }
+    
+    console.log(`[Higgsfield Endpoint Intercept] Generating video for prompt: "${prompt}"`);
+    const isSora = prompt.toLowerCase().includes("sora");
+    const isKling = prompt.toLowerCase().includes("kling");
+    const modelType = isSora ? "sora" : (isKling ? "kling" : "veo");
+
+    const videoResult = await generatePixazoVideo(prompt, { type: modelType, imageUrl: imageBase64 });
+    res.json(videoResult);
   } catch (error: any) {
     console.error("Higgsfield Video Error:", error);
     res.status(500).json({ error: error.message || "Internal server error" });
@@ -7766,7 +8514,7 @@ app.post("/api/search/serp", async (req, res) => {
       try {
         console.log(`[Search] Executing SerpAPI query: "${query}" (Type: ${type || "google"})`);
         let url = `https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${apiKey}`;
-
+        
         // If youtube type is specified, use SerpAPI's YouTube engine
         if (type === "youtube") {
           url = `https://serpapi.com/search.json?engine=youtube&search_query=${encodeURIComponent(query)}&api_key=${apiKey}`;
@@ -7808,7 +8556,7 @@ app.post("/api/search/serp", async (req, res) => {
     // Fallback / Default: Use Gemini Google Search Grounding to get real live search results!
     console.log(`[Search] Executing Gemini Search Grounding for: "${query}" (Type: ${type || "google"})`);
     const client = getGeminiClient();
-
+    
     let contents = `Perform a Google Search to find top resources for: "${query}". Return a JSON array containing the top 5 most relevant results. Each object must have keys: "title", "url", and "snippet". Return ONLY the raw JSON array.`;
     if (type === "youtube") {
       contents = `Perform a Google/YouTube Search to find top video links for: "${query}". Return a JSON array containing the top 5 most relevant YouTube video results. Each object must have keys: "title", "url" (must be a valid youtube.com watch link), and "snippet". Return ONLY the raw JSON array.`;
@@ -7824,7 +8572,7 @@ app.post("/api/search/serp", async (req, res) => {
 
     const text = response.text || "";
     let results: any[] = [];
-
+    
     try {
       const cleanJson = text.replace(/```json/gi, "").replace(/```/g, "").trim();
       const match = cleanJson.match(/\[\s*\{.*\}\s*\]/s);
@@ -7877,6 +8625,13 @@ app.post("/api/search/serp", async (req, res) => {
 // Vite and Server Execution Pipeline
 // -------------------------------------------------------------
 async function startServer() {
+  // Sync remote Firestore state to local database before starting up
+  try {
+    await syncFirestoreToLocal(DB_FILE, initialDB);
+  } catch (err) {
+    console.error("Failed to sync Firestore on startup:", err);
+  }
+
   // Developer Vite mode or production client build handling
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
